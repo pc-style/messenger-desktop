@@ -23,7 +23,7 @@ jobs:
         run: bun install
 
       - name: Build app
-        run: bun run build -- --publish never
+        run: bun run build:mac -- --publish never
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -33,17 +33,46 @@ jobs:
             dist/*.dmg
             dist/*.zip
 
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build app
+        run: bun run build:win -- --publish never
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Messenger-Windows
+          path: |
+            dist/*.exe
+
   release:
-    needs: build-macos
+    needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
-      - name: Download artifacts
+      - name: Download macOS artifacts
         uses: actions/download-artifact@v4
         with:
           name: Messenger-macOS
+          path: dist
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: Messenger-Windows
           path: dist
 
       - name: Create Release
