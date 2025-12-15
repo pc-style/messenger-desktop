@@ -4,7 +4,7 @@ Electron wrapper for messenger.com with full video/audio call support.
 
 ## Features
 
-- Native macOS app
+- Native macOS and Windows apps
 - WebRTC support for video/audio calls
 - Camera, microphone, and notification permissions
 - Chrome user agent for full compatibility
@@ -13,7 +13,9 @@ Electron wrapper for messenger.com with full video/audio call support.
 
 ### From Releases
 
-Download the latest `.dmg` from [Releases](../../releases) and drag to Applications.
+Download the latest build from [Releases](../../releases):
+- **macOS**: `.dmg` - drag to Applications
+- **Windows**: `.exe` installer or portable version
 
 ### Build from source
 
@@ -39,10 +41,10 @@ bun run dev
 ## Build
 
 ```bash
-bun run build
+bun run build:mac   # macOS .dmg
+bun run build:win   # Windows .exe
+bun run build       # all platforms
 ```
-
-Output: `dist/Messenger.dmg`
 
 ## License
 
