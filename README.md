@@ -1,49 +1,52 @@
-# Messenger Desktop
+# Messenger Unleashed
 
-Electron wrapper for messenger.com with full video/audio call support.
+Messenger desktop app with extra features.
 
 ## Features
 
-- Native macOS and Windows apps
-- WebRTC support for video/audio calls
-- Camera, microphone, and notification permissions
-- Chrome user agent for full compatibility
+- **Always on Top** - Keep window floating above others (`Cmd+Shift+T`)
+- **OLED Dark Theme** - True black background for OLED displays
+- **Compact Mode** - Reduced spacing for more content
+- **Picture in Picture** - Floating mini window (`Cmd+Shift+P`)
+- **Do Not Disturb** - Suppress notifications (`Cmd+Shift+D`)
+- Full WebRTC support for video/audio calls
+- Settings persist between sessions
 
 ## Install
 
 ### From Releases
 
-Download the latest build from [Releases](../../releases):
-- **macOS**: `.dmg` - drag to Applications
-- **Windows**: `.exe` installer or portable version
+Download from [Releases](../../releases):
+- **macOS**: `.dmg`
+- **Windows**: `.exe`
 
 ### Build from source
 
-Requires [Bun](https://bun.sh):
-
 ```bash
-# install bun if needed
 curl -fsSL https://bun.sh/install | bash
-
-# clone and build
 git clone https://github.com/YOUR_USERNAME/messenger-desktop.git
 cd messenger-desktop
-./install.sh
+git checkout dev/unleashed
+bun install && bun run build
 ```
+
+## Usage
+
+All features accessible via **Unleashed** menu or keyboard shortcuts:
+
+| Feature | Shortcut |
+|---------|----------|
+| Always on Top | `Cmd+Shift+T` |
+| Do Not Disturb | `Cmd+Shift+D` |
+| Picture in Picture | `Cmd+Shift+P` |
+
+Themes: **Unleashed → Theme** menu
 
 ## Development
 
 ```bash
 bun install
 bun run dev
-```
-
-## Build
-
-```bash
-bun run build:mac   # macOS .dmg
-bun run build:win   # Windows .exe
-bun run build       # all platforms
 ```
 
 ## License

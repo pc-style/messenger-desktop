@@ -1,8 +1,8 @@
 {
-  "name": "messenger",
-  "productName": "Messenger",
-  "version": "1.0.2",
-  "description": "Desktop app for Messenger",
+  "name": "messenger-unleashed",
+  "productName": "Messenger Unleashed",
+  "version": "1.0.0",
+  "description": "Messenger desktop app with extra features",
   "main": "main.js",
   "scripts": {
     "dev": "electron .",
@@ -10,13 +10,16 @@
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win"
   },
+  "dependencies": {
+    "electron-store": "^8.1.0"
+  },
   "devDependencies": {
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "com.messenger.desktop",
-    "productName": "Messenger",
+    "appId": "com.messenger.unleashed",
+    "productName": "Messenger Unleashed",
     "mac": {
       "category": "public.app-category.social-networking",
       "target": ["dmg", "zip"],
@@ -31,7 +34,7 @@
       "allowToChangeInstallationDirectory": true
     },
     "dmg": {
-      "title": "Messenger",
+      "title": "Messenger Unleashed",
       "contents": [
         { "x": 130, "y": 220 },
         { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
@@ -39,7 +42,8 @@
     },
     "files": [
       "main.js",
-      "preload.js"
+      "preload.js",
+      "themes.css"
     ]
   }
 }
