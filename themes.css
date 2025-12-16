@@ -1,0 +1,139 @@
+/* oled */
+:root {
+  color-scheme: dark;
+}
+
+/* override messenger dark mode grays with true black */
+html, body,
+div[role="main"],
+div[role="navigation"],
+div[role="complementary"],
+div[aria-label="Chats"],
+div[role="banner"] {
+  background-color: #000 !important;
+}
+
+/* sidebar chat list area */
+div[aria-label="Chats"] > div {
+  background-color: #000 !important;
+}
+
+/* message area background */
+div[aria-label="Messages"] {
+  background-color: #000 !important;
+}
+
+/* scrollbar */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #000; }
+::-webkit-scrollbar-thumb { background: #222; border-radius: 4px; }
+
+/* nord */
+:root {
+  color-scheme: dark;
+}
+
+html, body,
+div[role="main"],
+div[role="navigation"],
+div[role="complementary"],
+div[aria-label="Chats"],
+div[role="banner"] {
+  background-color: #2e3440 !important;
+}
+
+div[aria-label="Chats"] > div {
+  background-color: #2e3440 !important;
+}
+
+div[aria-label="Messages"] {
+  background-color: #2e3440 !important;
+}
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #2e3440; }
+::-webkit-scrollbar-thumb { background: #4c566a; border-radius: 4px; }
+
+/* dracula */
+:root {
+  color-scheme: dark;
+}
+
+html, body,
+div[role="main"],
+div[role="navigation"],
+div[role="complementary"],
+div[aria-label="Chats"],
+div[role="banner"] {
+  background-color: #282a36 !important;
+}
+
+div[aria-label="Chats"] > div {
+  background-color: #282a36 !important;
+}
+
+div[aria-label="Messages"] {
+  background-color: #282a36 !important;
+}
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #282a36; }
+::-webkit-scrollbar-thumb { background: #6272a4; border-radius: 4px; }
+
+/* solarized */
+:root {
+  color-scheme: dark;
+}
+
+html, body,
+div[role="main"],
+div[role="navigation"],
+div[role="complementary"],
+div[aria-label="Chats"],
+div[role="banner"] {
+  background-color: #002b36 !important;
+}
+
+div[aria-label="Chats"] > div {
+  background-color: #002b36 !important;
+}
+
+div[aria-label="Messages"] {
+  background-color: #002b36 !important;
+}
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #002b36; }
+::-webkit-scrollbar-thumb { background: #586e75; border-radius: 4px; }
+
+/* highcontrast */
+:root {
+  color-scheme: dark;
+}
+
+html, body,
+div[role="main"],
+div[role="navigation"],
+div[role="complementary"],
+div[aria-label="Chats"],
+div[role="banner"] {
+  background-color: #000 !important;
+}
+
+div[aria-label="Chats"] > div {
+  background-color: #000 !important;
+}
+
+div[aria-label="Messages"] {
+  background-color: #000 !important;
+}
+
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-track { background: #000; border: 1px solid #fff; }
+::-webkit-scrollbar-thumb { background: #fff; }
+
+/* compact */
+div[role="listitem"],
+div[role="row"] {
+  padding: 2px 0 !important;
+}
