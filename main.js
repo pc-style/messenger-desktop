@@ -71,7 +71,8 @@ function getThemeCSS(theme) {
   return match ? match[1] : ''
 }
 
-function applyTheme(theme) {
+function applyThemeCSS(theme) {
+  // applies theme CSS without reloading - used after page load
   if (!mainWindow) return
 
   const css = getThemeCSS(theme)
@@ -80,10 +81,16 @@ function applyTheme(theme) {
   if (css) {
     mainWindow.webContents.insertCSS(css, { cssKey: 'theme' }).catch(() => {})
   }
+}
+
+function applyTheme(theme) {
+  if (!mainWindow) return
 
   store.set('theme', theme)
   updateMenu()
-  reloadMessenger()
+
+  // reload to fully apply the theme since CSS injection doesn't catch all elements
+  mainWindow.webContents.reloadIgnoringCache()
 }
 
 function toggleAlwaysOnTop() {
@@ -91,14 +98,12 @@ function toggleAlwaysOnTop() {
   store.set('alwaysOnTop', !current)
   mainWindow.setAlwaysOnTop(!current)
   updateMenu()
-  reloadMessenger()
 }
 
 function toggleDoNotDisturb() {
   const current = store.get('doNotDisturb')
   store.set('doNotDisturb', !current)
   updateMenu()
-  reloadMessenger()
 }
 
 function toggleLaunchAtLogin() {
@@ -140,11 +145,11 @@ function toggleFocusMode() {
       div[role="main"] { width: 100% !important; max-width: 100% !important; }
     `, { cssKey: 'focus-mode' })
   } else {
-    mainWindow.webContents.removeInsertedCSS('focus-mode').catch(() => {})
+    // reload to properly restore sidebar since CSS removal doesn't always work
+    mainWindow.webContents.reloadIgnoringCache()
   }
 
   updateMenu()
-  reloadMessenger()
 }
 
 function reloadMessenger() {
@@ -173,11 +178,16 @@ function toggleMenuBarMode() {
   store.set('menuBarMode', newValue)
 
   if (newValue) {
-    createTray()
-    if (mainWindow) {
-      if (process.platform === 'darwin' && app.dock) app.dock.hide()
+    const success = createTray()
+    if (success && mainWindow) {
       mainWindow.setSkipTaskbar(true)
+      // hide window and dock when entering menu bar mode
       mainWindow.hide()
+      if (process.platform === 'darwin' && app.dock) app.dock.hide()
+    }
+    if (!success) {
+      store.set('menuBarMode', false)
+      dialog.showErrorBox('Menu Bar Mode', 'Failed to create tray icon.')
     }
   } else {
     if (tray) {
@@ -187,6 +197,7 @@ function toggleMenuBarMode() {
     if (mainWindow) {
       mainWindow.setSkipTaskbar(false)
       mainWindow.show()
+      mainWindow.focus()
     }
     if (process.platform === 'darwin' && app.dock) app.dock.show()
   }
@@ -195,38 +206,68 @@ function toggleMenuBarMode() {
 }
 
 function createTray() {
-  if (tray) return
+  if (tray) return true
 
   const { Tray } = require('electron')
 
-  const iconPath = process.platform === 'darwin'
-    ? path.join(__dirname, 'icon.icns')
-    : path.join(__dirname, 'icon.ico')
+  try {
+    // prefer the pre-sized tray PNG, fall back to other icons
+    let iconPath = path.join(__dirname, 'trayIcon.png')
+    if (!fs.existsSync(iconPath)) {
+      iconPath = path.join(__dirname, 'icon.png')
+    }
+    if (!fs.existsSync(iconPath)) {
+      iconPath = path.join(__dirname, 'icon.ico')
+    }
+    if (!fs.existsSync(iconPath)) {
+      iconPath = path.join(__dirname, 'icon.icns')
+    }
 
-  // keep status icon sharp in the menubar/system tray
-  const trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
-  if (process.platform === 'darwin') trayIcon.setTemplateImage(true)
-  tray = new Tray(trayIcon)
-  tray.setToolTip('Messenger Unleashed')
-  if (tray.setTitle) tray.setTitle(unreadCount > 0 ? ` ${unreadCount}` : '')
+    if (!fs.existsSync(iconPath)) {
+      console.error('No icon file found for tray')
+      return false
+    }
 
-  tray.on('click', () => {
-    if (mainWindow) {
-      if (mainWindow.isVisible()) {
-        mainWindow.hide()
-      } else {
+    const trayIcon = nativeImage.createFromPath(iconPath)
+    if (trayIcon.isEmpty()) {
+      console.error('Failed to load tray icon from:', iconPath)
+      return false
+    }
+
+    // resize to appropriate size for menu bar (16x16 on macOS, 16x16 on Windows)
+    const resized = trayIcon.resize({ width: 16, height: 16 })
+    if (process.platform === 'darwin') resized.setTemplateImage(true)
+
+    tray = new Tray(resized)
+    tray.setToolTip('Messenger Unleashed')
+    if (tray.setTitle) tray.setTitle(unreadCount > 0 ? ` ${unreadCount}` : '')
+
+    tray.on('click', () => {
+      if (mainWindow) {
+        if (mainWindow.isVisible()) {
+          mainWindow.hide()
+          if (process.platform === 'darwin' && app.dock) app.dock.hide()
+        } else {
+          mainWindow.show()
+          mainWindow.focus()
+          if (process.platform === 'darwin' && app.dock) app.dock.show()
+        }
+      }
+    })
+
+    tray.on('right-click', () => {
+      if (mainWindow) {
         mainWindow.show()
         mainWindow.focus()
+        if (process.platform === 'darwin' && app.dock) app.dock.show()
       }
-    }
-  })
+    })
 
-  tray.on('right-click', () => {
-    if (mainWindow) {
-      mainWindow.show()
-      mainWindow.focus()
-    }
-  })
+    return true
+  } catch (err) {
+    console.error('Failed to create tray:', err)
+    return false
+  }
 }
 
 function toggleBlockReadReceipts() {
@@ -489,18 +530,30 @@ function navigateConversation(direction) {
   if (!mainWindow) return
   mainWindow.webContents.executeJavaScript(`
     (function() {
-      const rows = Array.from(document.querySelectorAll('div[role="row"][aria-label], a[role="link"][tabindex="0"]'));
+      // find chat list items in sidebar - try multiple selectors for Messenger's DOM
+      const chatList = document.querySelector('div[aria-label="Chats"]') ||
+                       document.querySelector('div[role="navigation"]');
+      if (!chatList) return;
+
+      // get clickable chat rows - look for links or grid cells with aria-label
+      const rows = Array.from(chatList.querySelectorAll('a[href*="/t/"], div[role="gridcell"][aria-label], div[role="row"] a'));
       if (!rows.length) return;
 
-      const focused = document.activeElement;
-      let currentIdx = rows.findIndex(r => r.contains(focused) || r === focused);
-      if (currentIdx === -1) currentIdx = 0;
+      // find currently selected/focused chat
+      const active = document.querySelector('a[aria-current="page"]') ||
+                     document.activeElement;
+      let currentIdx = rows.findIndex(r => r.contains(active) || r === active || r.getAttribute('aria-current') === 'page');
+
+      // if no current selection, start from beginning or end based on direction
+      if (currentIdx === -1) {
+        currentIdx = ${direction === 'up' ? 'rows.length' : '-1'};
+      }
 
       const nextIdx = ${direction === 'up' ? 'Math.max(0, currentIdx - 1)' : 'Math.min(rows.length - 1, currentIdx + 1)'};
       const target = rows[nextIdx];
       if (target) {
-        target.focus();
         target.click();
+        target.focus();
       }
     })()
   `).catch(() => {})
@@ -980,6 +1033,9 @@ function createWindow() {
 
   mainWindow.webContents.setUserAgent(USER_AGENT)
 
+  // increase max listeners to avoid warnings during navigation
+  mainWindow.webContents.setMaxListeners(20)
+
   // apply saved window opacity
   const opacity = store.get('windowOpacity')
   if (opacity < 1.0) {
@@ -1009,7 +1065,7 @@ function createWindow() {
   mainWindow.webContents.on('did-finish-load', () => {
     const theme = store.get('theme')
     if (theme !== 'default') {
-      applyTheme(theme)
+      applyThemeCSS(theme)
     }
 
     // reapply focus mode if enabled
@@ -1076,16 +1132,13 @@ function createWindow() {
 
   // initialize menu bar mode if enabled
   if (store.get('menuBarMode')) {
-    createTray()
-    if (tray) {
+    const success = createTray()
+    if (success) {
       mainWindow.setSkipTaskbar(true)
-      // keep window visible on first launch to avoid lock-out if tray fails to appear
-      if (process.platform === 'darwin' && app.dock) app.dock.show()
-      mainWindow.show()
+      // keep window and dock visible on startup so user isn't locked out
     } else {
-      // fallback: disable menubar mode if tray is unavailable
+      // tray failed, disable menu bar mode
       store.set('menuBarMode', false)
-      mainWindow.setSkipTaskbar(false)
     }
   }
 
