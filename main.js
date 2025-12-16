@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, Menu, ipcMain, Notification, dialog } = require('electron')
+const { app, BrowserWindow, session, Menu, ipcMain, Notification, dialog, nativeImage } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const Store = require('electron-store')
@@ -6,7 +6,7 @@ const Store = require('electron-store')
 const store = new Store({
   defaults: {
     alwaysOnTop: false,
-    theme: 'default', // default, oled, compact
+    theme: 'default', // default, oled, compact, nord, dracula, solarized, highcontrast
     doNotDisturb: false,
     windowBounds: { width: 1200, height: 800 },
     launchAtLogin: false,
@@ -18,7 +18,14 @@ const store = new Store({
     ],
     menuBarMode: false,
     blockReadReceipts: false,
-    spellCheck: true
+    spellCheck: true,
+    keywordAlerts: ['urgent', 'asap'],
+    keywordAlertsEnabled: true,
+    clipboardSanitize: true,
+    scheduleDelayMs: 30000,
+    blockTypingIndicator: false,
+    windowOpacity: 1.0,
+    customCSS: ''
   }
 })
 
@@ -28,6 +35,7 @@ const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/
 let mainWindow = null
 let pipWindow = null
 let tray = null
+let unreadCount = 0
 
 // handle native notifications from renderer
 ipcMain.on('show-notification', (event, data) => {
@@ -75,6 +83,7 @@ function applyTheme(theme) {
 
   store.set('theme', theme)
   updateMenu()
+  reloadMessenger()
 }
 
 function toggleAlwaysOnTop() {
@@ -82,22 +91,36 @@ function toggleAlwaysOnTop() {
   store.set('alwaysOnTop', !current)
   mainWindow.setAlwaysOnTop(!current)
   updateMenu()
+  reloadMessenger()
 }
 
 function toggleDoNotDisturb() {
   const current = store.get('doNotDisturb')
   store.set('doNotDisturb', !current)
   updateMenu()
+  reloadMessenger()
 }
 
 function toggleLaunchAtLogin() {
   const current = store.get('launchAtLogin')
   const newValue = !current
 
-  app.setLoginItemSettings({
-    openAtLogin: newValue,
-    openAsHidden: false
-  })
+  const canSetLogin =
+    process.platform !== 'darwin' ||
+    (app.isInApplicationsFolder && app.isInApplicationsFolder())
+
+  if (canSetLogin) {
+    try {
+      app.setLoginItemSettings({
+        openAtLogin: newValue,
+        openAsHidden: false
+      })
+    } catch (err) {
+      console.warn('Failed to set login item', err)
+    }
+  } else {
+    console.warn('Skipping login item update (app not in /Applications or unsupported platform state)')
+  }
 
   store.set('launchAtLogin', newValue)
   updateMenu()
@@ -121,6 +144,12 @@ function toggleFocusMode() {
   }
 
   updateMenu()
+  reloadMessenger()
+}
+
+function reloadMessenger() {
+  if (!mainWindow) return
+  mainWindow.webContents.reloadIgnoringCache()
 }
 
 function sendQuickReply(text) {
@@ -146,7 +175,9 @@ function toggleMenuBarMode() {
   if (newValue) {
     createTray()
     if (mainWindow) {
+      if (process.platform === 'darwin' && app.dock) app.dock.hide()
       mainWindow.setSkipTaskbar(true)
+      mainWindow.hide()
     }
   } else {
     if (tray) {
@@ -157,6 +188,7 @@ function toggleMenuBarMode() {
       mainWindow.setSkipTaskbar(false)
       mainWindow.show()
     }
+    if (process.platform === 'darwin' && app.dock) app.dock.show()
   }
 
   updateMenu()
@@ -167,13 +199,16 @@ function createTray() {
 
   const { Tray } = require('electron')
 
-  // use template icon for macOS
   const iconPath = process.platform === 'darwin'
     ? path.join(__dirname, 'icon.icns')
-    : path.join(__dirname, 'icon.icns')
+    : path.join(__dirname, 'icon.ico')
 
-  tray = new Tray(iconPath)
+  // keep status icon sharp in the menubar/system tray
+  const trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
+  if (process.platform === 'darwin') trayIcon.setTemplateImage(true)
+  tray = new Tray(trayIcon)
   tray.setToolTip('Messenger Unleashed')
+  if (tray.setTitle) tray.setTitle(unreadCount > 0 ? ` ${unreadCount}` : '')
 
   tray.on('click', () => {
     if (mainWindow) {
@@ -218,13 +253,180 @@ function toggleBlockReadReceipts() {
   updateMenu()
 }
 
+function focusSearch() {
+  if (!mainWindow) return
+  mainWindow.webContents.executeJavaScript(`
+    (function() {
+      const search = document.querySelector('input[aria-label="Search Messenger"], input[placeholder*="Search"], input[type="search"]');
+      if (!search) return false;
+      search.focus();
+      if (search.select) search.select();
+      return true;
+    })()
+  `).catch(() => {})
+}
+
+function setScheduleDelay(delayMs) {
+  store.set('scheduleDelayMs', delayMs)
+  pushRendererConfig()
+  updateMenu()
+}
+
+function scheduleSendNow() {
+  if (!mainWindow) return
+  const delay = store.get('scheduleDelayMs')
+  mainWindow.webContents.send('schedule-send', delay)
+}
+
+function toggleClipboardSanitize() {
+  const next = !store.get('clipboardSanitize')
+  store.set('clipboardSanitize', next)
+  pushRendererConfig()
+  updateMenu()
+}
+
+function toggleKeywordAlerts() {
+  const next = !store.get('keywordAlertsEnabled')
+  store.set('keywordAlertsEnabled', next)
+  pushRendererConfig()
+  updateMenu()
+}
+
+function editKeywordAlerts() {
+  if (!mainWindow) return
+  const existing = store.get('keywordAlerts').join(', ')
+  mainWindow.webContents.executeJavaScript(`prompt('Keyword alerts (comma separated)', ${JSON.stringify(existing)})`)
+    .then(result => {
+      if (typeof result !== 'string') return
+      const list = result.split(',').map(k => k.trim()).filter(Boolean)
+      store.set('keywordAlerts', list)
+      pushRendererConfig()
+      updateMenu()
+    })
+    .catch(() => {})
+}
+
+function pushRendererConfig() {
+  if (!mainWindow) return
+  const config = {
+    keywordAlerts: store.get('keywordAlerts'),
+    keywordAlertsEnabled: store.get('keywordAlertsEnabled'),
+    clipboardSanitize: store.get('clipboardSanitize'),
+    scheduleDelayMs: store.get('scheduleDelayMs')
+  }
+
+  mainWindow.webContents.send('update-config', config)
+
+  // bootstrap renderer helper only once; subsequent calls just refresh config
+  mainWindow.webContents.executeJavaScript(`
+    (function() {
+      const cfg = ${JSON.stringify(config)};
+      window.__unleashedConfig = cfg;
+      if (window.__unleashedBootstrapped) return;
+      window.__unleashedBootstrapped = true;
+
+      window.addEventListener('unleashed-config', (e) => {
+        window.__unleashedConfig = e.detail || {};
+      });
+
+      // keyword alerts
+      (function setupKeywordAlerts() {
+        const seenNodes = new WeakSet();
+        const getKeywords = () => (window.__unleashedConfig?.keywordAlerts || []).map(k => k.toLowerCase().trim()).filter(Boolean);
+        const enabled = () => !!window.__unleashedConfig?.keywordAlertsEnabled;
+        const notifyHit = (text) => {
+          if (!enabled()) return;
+          const kws = getKeywords();
+          if (!kws.length) return;
+          const lower = text.toLowerCase();
+          const hit = kws.find(k => lower.includes(k));
+          if (!hit) return;
+          if (window.electronNotify) {
+            window.electronNotify.send('Keyword alert: ' + hit, { body: text.slice(0, 140) });
+          }
+        };
+
+        const observer = new MutationObserver((mutations) => {
+          mutations.forEach(m => {
+            m.addedNodes.forEach(node => {
+              if (!(node instanceof HTMLElement)) return;
+              if (seenNodes.has(node)) return;
+              seenNodes.add(node);
+              const text = node.innerText || '';
+              if (text) notifyHit(text);
+            });
+          });
+        });
+
+        observer.observe(document.body, { childList: true, subtree: true });
+      })();
+
+      // clipboard sanitizer
+      document.addEventListener('paste', (event) => {
+        if (!window.__unleashedConfig?.clipboardSanitize) return;
+        const text = event.clipboardData?.getData('text/plain');
+        if (!text) return;
+        try {
+          const url = new URL(text);
+          const params = ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','utm_id','fbclid','gclid','yclid','mc_cid','mc_eid','ref','ref_src'];
+          params.forEach(p => url.searchParams.delete(p));
+          event.preventDefault();
+          document.execCommand('insertText', false, url.toString());
+        } catch (_) {
+          // not a URL; leave default paste
+        }
+      }, true);
+
+      // scheduled send
+      window.addEventListener('unleashed-schedule-send', (e) => {
+        const delay = e.detail?.delayMs ?? window.__unleashedConfig?.scheduleDelayMs ?? 0;
+        const input = document.querySelector('[contenteditable="true"][role="textbox"]');
+        if (!input) return;
+        const saved = input.innerHTML;
+        const banner = document.createElement('div');
+        banner.textContent = 'Scheduled send in ' + Math.round(delay / 1000) + 's';
+        Object.assign(banner.style, {
+          position: 'fixed',
+          bottom: '20px',
+          right: '20px',
+          padding: '10px 14px',
+          background: 'rgba(0,0,0,0.8)',
+          color: '#fff',
+          borderRadius: '8px',
+          zIndex: '999999',
+          fontSize: '13px'
+        });
+        document.body.appendChild(banner);
+        setTimeout(() => banner.remove(), delay + 6000);
+
+        setTimeout(() => {
+          input.focus();
+          input.innerHTML = saved;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          const eventEnter = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true });
+          input.dispatchEvent(eventEnter);
+        }, delay);
+      });
+    })();
+  `).catch(() => {})
+}
+
+function updateUnreadBadge(count) {
+  unreadCount = count
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.setBadge(count > 0 ? String(count) : '')
+  }
+  if (tray && tray.setTitle) {
+    tray.setTitle(count > 0 ? ` ${count}` : '')
+  }
+}
+
 function toggleSpellCheck() {
   const current = store.get('spellCheck')
   const newValue = !current
   store.set('spellCheck', newValue)
 
   // show dialog that restart is needed
-  const { dialog } = require('electron')
   dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: 'Restart Required',
@@ -232,6 +434,105 @@ function toggleSpellCheck() {
     buttons: ['OK']
   })
 
+  updateMenu()
+}
+
+function toggleBlockTypingIndicator() {
+  const current = store.get('blockTypingIndicator')
+  const newValue = !current
+  store.set('blockTypingIndicator', newValue)
+
+  if (!mainWindow) return
+
+  if (newValue) {
+    // block typing indicator by intercepting input events
+    mainWindow.webContents.executeJavaScript(`
+      (function() {
+        if (window.__typingBlockerInstalled) return;
+        window.__typingBlockerInstalled = true;
+
+        // intercept XMLHttpRequest to block typing indicator requests
+        const origSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.send = function(body) {
+          if (body && typeof body === 'string' && body.includes('typing')) {
+            return; // block typing indicator requests
+          }
+          return origSend.apply(this, arguments);
+        };
+
+        // also block fetch requests for typing
+        const origFetch = window.fetch;
+        window.fetch = function(url, options) {
+          if (options?.body && typeof options.body === 'string' && options.body.includes('typing')) {
+            return Promise.resolve(new Response('{}'));
+          }
+          return origFetch.apply(this, arguments);
+        };
+      })()
+    `)
+  } else {
+    mainWindow.webContents.reload()
+  }
+
+  updateMenu()
+}
+
+function setWindowOpacity(opacity) {
+  store.set('windowOpacity', opacity)
+  if (mainWindow) {
+    mainWindow.setOpacity(opacity)
+  }
+  updateMenu()
+}
+
+function navigateConversation(direction) {
+  if (!mainWindow) return
+  mainWindow.webContents.executeJavaScript(`
+    (function() {
+      const rows = Array.from(document.querySelectorAll('div[role="row"][aria-label], a[role="link"][tabindex="0"]'));
+      if (!rows.length) return;
+
+      const focused = document.activeElement;
+      let currentIdx = rows.findIndex(r => r.contains(focused) || r === focused);
+      if (currentIdx === -1) currentIdx = 0;
+
+      const nextIdx = ${direction === 'up' ? 'Math.max(0, currentIdx - 1)' : 'Math.min(rows.length - 1, currentIdx + 1)'};
+      const target = rows[nextIdx];
+      if (target) {
+        target.focus();
+        target.click();
+      }
+    })()
+  `).catch(() => {})
+}
+
+function editCustomCSS() {
+  if (!mainWindow) return
+  const existing = store.get('customCSS')
+  mainWindow.webContents.executeJavaScript(`prompt('Enter custom CSS (will be injected on page load):', ${JSON.stringify(existing)})`)
+    .then(result => {
+      if (typeof result !== 'string') return
+      store.set('customCSS', result)
+      applyCustomCSS()
+      updateMenu()
+    })
+    .catch(() => {})
+}
+
+function applyCustomCSS() {
+  if (!mainWindow) return
+  const css = store.get('customCSS')
+  mainWindow.webContents.removeInsertedCSS('custom-css').catch(() => {})
+  if (css) {
+    mainWindow.webContents.insertCSS(css, { cssKey: 'custom-css' }).catch(() => {})
+  }
+}
+
+function clearCustomCSS() {
+  store.set('customCSS', '')
+  if (mainWindow) {
+    mainWindow.webContents.removeInsertedCSS('custom-css').catch(() => {})
+  }
   updateMenu()
 }
 
@@ -384,6 +685,12 @@ function updateMenu() {
   const menuBarMode = store.get('menuBarMode')
   const blockReadReceipts = store.get('blockReadReceipts')
   const spellCheck = store.get('spellCheck')
+  const scheduleDelayMs = store.get('scheduleDelayMs')
+  const clipboardSanitize = store.get('clipboardSanitize')
+  const keywordAlertsEnabled = store.get('keywordAlertsEnabled')
+  const blockTypingIndicator = store.get('blockTypingIndicator')
+  const windowOpacity = store.get('windowOpacity')
+  const customCSS = store.get('customCSS')
 
   const template = [
     {
@@ -444,12 +751,38 @@ function updateMenu() {
               checked: theme === 'default',
               click: () => applyTheme('default')
             },
+            { type: 'separator' },
             {
               label: 'OLED Dark',
               type: 'radio',
               checked: theme === 'oled',
               click: () => applyTheme('oled')
             },
+            {
+              label: 'Nord',
+              type: 'radio',
+              checked: theme === 'nord',
+              click: () => applyTheme('nord')
+            },
+            {
+              label: 'Dracula',
+              type: 'radio',
+              checked: theme === 'dracula',
+              click: () => applyTheme('dracula')
+            },
+            {
+              label: 'Solarized Dark',
+              type: 'radio',
+              checked: theme === 'solarized',
+              click: () => applyTheme('solarized')
+            },
+            {
+              label: 'High Contrast',
+              type: 'radio',
+              checked: theme === 'highcontrast',
+              click: () => applyTheme('highcontrast')
+            },
+            { type: 'separator' },
             {
               label: 'Compact',
               type: 'radio',
@@ -484,6 +817,42 @@ function updateMenu() {
         },
         { type: 'separator' },
         {
+          label: 'Focus Search',
+          accelerator: 'CmdOrCtrl+K',
+          click: focusSearch
+        },
+        {
+          label: `Send in ${Math.round(scheduleDelayMs / 1000)}s`,
+          accelerator: 'CmdOrCtrl+Alt+Enter',
+          click: scheduleSendNow
+        },
+        {
+          label: 'Schedule Delay',
+          submenu: [
+            { label: '5s', type: 'radio', checked: scheduleDelayMs === 5000, click: () => setScheduleDelay(5000) },
+            { label: '30s', type: 'radio', checked: scheduleDelayMs === 30000, click: () => setScheduleDelay(30000) },
+            { label: '2 min', type: 'radio', checked: scheduleDelayMs === 120000, click: () => setScheduleDelay(120000) }
+          ]
+        },
+        { type: 'separator' },
+        {
+          label: 'Clipboard Sanitizer',
+          type: 'checkbox',
+          checked: clipboardSanitize,
+          click: toggleClipboardSanitize
+        },
+        {
+          label: 'Keyword Alerts',
+          type: 'checkbox',
+          checked: keywordAlertsEnabled,
+          click: toggleKeywordAlerts
+        },
+        {
+          label: 'Edit Keyword Alerts...',
+          click: editKeywordAlerts
+        },
+        { type: 'separator' },
+        {
           label: 'Picture in Picture',
           accelerator: 'CmdOrCtrl+Shift+P',
           click: createPipWindow
@@ -509,10 +878,52 @@ function updateMenu() {
           click: toggleBlockReadReceipts
         },
         {
+          label: 'Block Typing Indicator',
+          type: 'checkbox',
+          checked: blockTypingIndicator,
+          click: toggleBlockTypingIndicator
+        },
+        {
           label: 'Spell Check',
           type: 'checkbox',
           checked: spellCheck,
           click: toggleSpellCheck
+        },
+        { type: 'separator' },
+        {
+          label: 'Window Opacity',
+          submenu: [
+            { label: '100%', type: 'radio', checked: windowOpacity === 1.0, click: () => setWindowOpacity(1.0) },
+            { label: '90%', type: 'radio', checked: windowOpacity === 0.9, click: () => setWindowOpacity(0.9) },
+            { label: '80%', type: 'radio', checked: windowOpacity === 0.8, click: () => setWindowOpacity(0.8) },
+            { label: '70%', type: 'radio', checked: windowOpacity === 0.7, click: () => setWindowOpacity(0.7) },
+            { label: '60%', type: 'radio', checked: windowOpacity === 0.6, click: () => setWindowOpacity(0.6) }
+          ]
+        },
+        {
+          label: 'Custom CSS',
+          submenu: [
+            {
+              label: customCSS ? 'Edit Custom CSS...' : 'Add Custom CSS...',
+              click: editCustomCSS
+            },
+            {
+              label: 'Clear Custom CSS',
+              enabled: !!customCSS,
+              click: clearCustomCSS
+            }
+          ]
+        },
+        { type: 'separator' },
+        {
+          label: 'Previous Chat',
+          accelerator: 'CmdOrCtrl+Up',
+          click: () => navigateConversation('up')
+        },
+        {
+          label: 'Next Chat',
+          accelerator: 'CmdOrCtrl+Down',
+          click: () => navigateConversation('down')
         },
         { type: 'separator' },
         {
@@ -569,6 +980,12 @@ function createWindow() {
 
   mainWindow.webContents.setUserAgent(USER_AGENT)
 
+  // apply saved window opacity
+  const opacity = store.get('windowOpacity')
+  if (opacity < 1.0) {
+    mainWindow.setOpacity(opacity)
+  }
+
   // handle permission requests for webrtc and notifications
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
     const allowedPermissions = ['media', 'mediaKeySystem', 'geolocation', 'notifications', 'fullscreen', 'pointerLock']
@@ -581,6 +998,12 @@ function createWindow() {
   })
 
   mainWindow.loadURL('https://www.messenger.com')
+
+  mainWindow.on('page-title-updated', (event, title) => {
+    const match = title.match(/\\((\\d+)\\)/)
+    const count = match ? parseInt(match[1], 10) : 0
+    updateUnreadBadge(Number.isFinite(count) ? count : 0)
+  })
 
   // apply saved theme and focus mode after page loads
   mainWindow.webContents.on('did-finish-load', () => {
@@ -608,6 +1031,37 @@ function createWindow() {
         })()
       `)
     }
+
+    // apply block typing indicator if enabled
+    if (store.get('blockTypingIndicator')) {
+      mainWindow.webContents.executeJavaScript(`
+        (function() {
+          if (window.__typingBlockerInstalled) return;
+          window.__typingBlockerInstalled = true;
+
+          const origSend = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.send = function(body) {
+            if (body && typeof body === 'string' && body.includes('typing')) {
+              return;
+            }
+            return origSend.apply(this, arguments);
+          };
+
+          const origFetch = window.fetch;
+          window.fetch = function(url, options) {
+            if (options?.body && typeof options.body === 'string' && options.body.includes('typing')) {
+              return Promise.resolve(new Response('{}'));
+            }
+            return origFetch.apply(this, arguments);
+          };
+        })()
+      `)
+    }
+
+    // apply custom CSS if any
+    applyCustomCSS()
+
+    pushRendererConfig()
   })
 
   // save window size on resize
@@ -623,7 +1077,16 @@ function createWindow() {
   // initialize menu bar mode if enabled
   if (store.get('menuBarMode')) {
     createTray()
-    mainWindow.setSkipTaskbar(true)
+    if (tray) {
+      mainWindow.setSkipTaskbar(true)
+      // keep window visible on first launch to avoid lock-out if tray fails to appear
+      if (process.platform === 'darwin' && app.dock) app.dock.show()
+      mainWindow.show()
+    } else {
+      // fallback: disable menubar mode if tray is unavailable
+      store.set('menuBarMode', false)
+      mainWindow.setSkipTaskbar(false)
+    }
   }
 
   updateMenu()
@@ -637,6 +1100,12 @@ app.on('ready', () => {
   globalShortcut.register('CmdOrCtrl+Shift+D', toggleDoNotDisturb)
   globalShortcut.register('CmdOrCtrl+Shift+F', toggleFocusMode)
   globalShortcut.register('CmdOrCtrl+Shift+P', createPipWindow)
+  globalShortcut.register('CmdOrCtrl+K', focusSearch)
+  globalShortcut.register('CmdOrCtrl+Alt+Enter', scheduleSendNow)
+
+  // conversation navigation
+  globalShortcut.register('CmdOrCtrl+Up', () => navigateConversation('up'))
+  globalShortcut.register('CmdOrCtrl+Down', () => navigateConversation('down'))
 
   // quick reply shortcuts
   const quickReplies = store.get('quickReplies')
@@ -648,10 +1117,19 @@ app.on('ready', () => {
 app.whenReady().then(() => {
   // sync login item with stored preference
   const launchAtLogin = store.get('launchAtLogin')
-  app.setLoginItemSettings({
-    openAtLogin: launchAtLogin,
-    openAsHidden: false
-  })
+  const canSetLogin =
+    process.platform !== 'darwin' ||
+    (app.isInApplicationsFolder && app.isInApplicationsFolder())
+  if (canSetLogin) {
+    try {
+      app.setLoginItemSettings({
+        openAtLogin: launchAtLogin,
+        openAsHidden: false
+      })
+    } catch (err) {
+      console.warn('Failed to set login item', err)
+    }
+  }
 
   createWindow()
 

@@ -1,6 +1,15 @@
 /* oled */
+:root {
+  color-scheme: dark;
+}
+
 body, html {
   background-color: #000000 !important;
+  color: #e8e8e8 !important;
+}
+
+a, a span {
+  color: #b388ff !important;
 }
 
 [data-theme="dark"] {
@@ -9,6 +18,11 @@ body, html {
   --card-background: #000000 !important;
   --hover-background: #111111 !important;
   --divider: #1a1a1a !important;
+  --primary-text: #f3f3f3 !important;
+  --secondary-text: #c8c8c8 !important;
+  --wash: #0b0b0b !important;
+  --primary-button-background: #1a1a1a !important;
+  --primary-button-text: #ffffff !important;
 }
 
 div[role="navigation"],
@@ -35,34 +49,405 @@ div[aria-label="Chats"] {
 div[aria-label*="Message"],
 div[contenteditable="true"] {
   background-color: #0a0a0a !important;
+  color: #f0f0f0 !important;
+}
+
+/* conversation bubbles and cards */
+div[aria-label="Conversation"] [style*="background-color"],
+div[role="article"],
+div[data-visualcompletion="ignore-dynamic"] {
+  background-color: #0d0d0d !important;
+  color: #f2f2f2 !important;
+  border-color: #1f1f1f !important;
+}
+
+/* icons/buttons */
+div[role="button"] svg path,
+div[role="button"] svg circle,
+div[role="button"] svg rect {
+  fill: #e5e5e5 !important;
+  stroke: #e5e5e5 !important;
+}
+
+/* composer bar controls */
+div[aria-label*="Message"] [role="button"],
+div[aria-label*="Message"] input,
+div[aria-label*="Message"] textarea {
+  background-color: #0a0a0a !important;
+  color: #f0f0f0 !important;
+}
+
+/* scrollbar */
+*::-webkit-scrollbar {
+  width: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #202020;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: #050505;
 }
 
 /* compact */
 /* reduce padding and spacing throughout */
 div[role="row"],
 div[role="listitem"] {
-  padding-top: 4px !important;
-  padding-bottom: 4px !important;
+  padding-top: 0px !important;
+  padding-bottom: 0px !important;
+  margin-top: 0px !important;
+  margin-bottom: 0px !important;
 }
 
 /* smaller avatars */
 img[alt*="avatar" i],
 div[role="img"][aria-label] {
-  width: 32px !important;
-  height: 32px !important;
+  width: 26px !important;
+  height: 26px !important;
 }
 
 /* tighter message spacing */
 div[dir="auto"] {
-  line-height: 1.3 !important;
+  line-height: 1.15 !important;
 }
 
 /* reduce header size */
 div[role="banner"] {
-  padding: 8px !important;
+  padding: 4px !important;
+  min-height: 36px !important;
 }
 
 /* smaller fonts */
-span[dir="auto"] {
-  font-size: 13px !important;
+span[dir="auto"],
+div[dir="auto"] {
+  font-size: 12px !important;
+}
+
+/* input bar compact */
+div[aria-label*="Message"],
+div[contenteditable="true"] {
+  min-height: 34px !important;
+  padding: 4px 8px !important;
+}
+
+/* nord */
+:root {
+  color-scheme: dark;
+}
+
+body, html {
+  background-color: #2e3440 !important;
+  color: #eceff4 !important;
+}
+
+a, a span {
+  color: #88c0d0 !important;
+}
+
+[data-theme="dark"] {
+  --primary-background: #2e3440 !important;
+  --secondary-background: #3b4252 !important;
+  --card-background: #2e3440 !important;
+  --hover-background: #434c5e !important;
+  --divider: #4c566a !important;
+  --primary-text: #eceff4 !important;
+  --secondary-text: #d8dee9 !important;
+  --wash: #3b4252 !important;
+  --primary-button-background: #5e81ac !important;
+  --primary-button-text: #eceff4 !important;
+}
+
+div[role="navigation"],
+div[role="main"],
+div[class*="__fb-light-mode"],
+div[class*="x1n2onr6"] {
+  background-color: #2e3440 !important;
+}
+
+div[aria-label*="messages"],
+div[aria-label*="Messages"],
+div[data-scope="messages_table"] {
+  background-color: #2e3440 !important;
+}
+
+div[role="complementary"],
+div[aria-label="Chats"] {
+  background-color: #2e3440 !important;
+}
+
+div[aria-label*="Message"],
+div[contenteditable="true"] {
+  background-color: #3b4252 !important;
+  color: #eceff4 !important;
+}
+
+div[aria-label="Conversation"] [style*="background-color"],
+div[role="article"],
+div[data-visualcompletion="ignore-dynamic"] {
+  background-color: #3b4252 !important;
+  color: #eceff4 !important;
+  border-color: #4c566a !important;
+}
+
+div[role="button"] svg path,
+div[role="button"] svg circle,
+div[role="button"] svg rect {
+  fill: #d8dee9 !important;
+  stroke: #d8dee9 !important;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #4c566a;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: #2e3440;
+}
+
+/* dracula */
+:root {
+  color-scheme: dark;
+}
+
+body, html {
+  background-color: #282a36 !important;
+  color: #f8f8f2 !important;
+}
+
+a, a span {
+  color: #bd93f9 !important;
+}
+
+[data-theme="dark"] {
+  --primary-background: #282a36 !important;
+  --secondary-background: #44475a !important;
+  --card-background: #282a36 !important;
+  --hover-background: #44475a !important;
+  --divider: #6272a4 !important;
+  --primary-text: #f8f8f2 !important;
+  --secondary-text: #f8f8f2 !important;
+  --wash: #21222c !important;
+  --primary-button-background: #bd93f9 !important;
+  --primary-button-text: #282a36 !important;
+}
+
+div[role="navigation"],
+div[role="main"],
+div[class*="__fb-light-mode"],
+div[class*="x1n2onr6"] {
+  background-color: #282a36 !important;
+}
+
+div[aria-label*="messages"],
+div[aria-label*="Messages"],
+div[data-scope="messages_table"] {
+  background-color: #282a36 !important;
+}
+
+div[role="complementary"],
+div[aria-label="Chats"] {
+  background-color: #282a36 !important;
+}
+
+div[aria-label*="Message"],
+div[contenteditable="true"] {
+  background-color: #44475a !important;
+  color: #f8f8f2 !important;
+}
+
+div[aria-label="Conversation"] [style*="background-color"],
+div[role="article"],
+div[data-visualcompletion="ignore-dynamic"] {
+  background-color: #44475a !important;
+  color: #f8f8f2 !important;
+  border-color: #6272a4 !important;
+}
+
+div[role="button"] svg path,
+div[role="button"] svg circle,
+div[role="button"] svg rect {
+  fill: #f8f8f2 !important;
+  stroke: #f8f8f2 !important;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #bd93f9;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: #21222c;
+}
+
+/* solarized */
+:root {
+  color-scheme: dark;
+}
+
+body, html {
+  background-color: #002b36 !important;
+  color: #839496 !important;
+}
+
+a, a span {
+  color: #268bd2 !important;
+}
+
+[data-theme="dark"] {
+  --primary-background: #002b36 !important;
+  --secondary-background: #073642 !important;
+  --card-background: #002b36 !important;
+  --hover-background: #073642 !important;
+  --divider: #586e75 !important;
+  --primary-text: #93a1a1 !important;
+  --secondary-text: #839496 !important;
+  --wash: #073642 !important;
+  --primary-button-background: #268bd2 !important;
+  --primary-button-text: #fdf6e3 !important;
+}
+
+div[role="navigation"],
+div[role="main"],
+div[class*="__fb-light-mode"],
+div[class*="x1n2onr6"] {
+  background-color: #002b36 !important;
+}
+
+div[aria-label*="messages"],
+div[aria-label*="Messages"],
+div[data-scope="messages_table"] {
+  background-color: #002b36 !important;
+}
+
+div[role="complementary"],
+div[aria-label="Chats"] {
+  background-color: #002b36 !important;
+}
+
+div[aria-label*="Message"],
+div[contenteditable="true"] {
+  background-color: #073642 !important;
+  color: #93a1a1 !important;
+}
+
+div[aria-label="Conversation"] [style*="background-color"],
+div[role="article"],
+div[data-visualcompletion="ignore-dynamic"] {
+  background-color: #073642 !important;
+  color: #93a1a1 !important;
+  border-color: #586e75 !important;
+}
+
+div[role="button"] svg path,
+div[role="button"] svg circle,
+div[role="button"] svg rect {
+  fill: #839496 !important;
+  stroke: #839496 !important;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #586e75;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: #073642;
+}
+
+/* highcontrast */
+:root {
+  color-scheme: dark;
+}
+
+body, html {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+a, a span {
+  color: #00ffff !important;
+  text-decoration: underline !important;
+}
+
+[data-theme="dark"] {
+  --primary-background: #000000 !important;
+  --secondary-background: #1a1a1a !important;
+  --card-background: #000000 !important;
+  --hover-background: #333333 !important;
+  --divider: #ffffff !important;
+  --primary-text: #ffffff !important;
+  --secondary-text: #ffffff !important;
+  --wash: #0a0a0a !important;
+  --primary-button-background: #ffff00 !important;
+  --primary-button-text: #000000 !important;
+}
+
+div[role="navigation"],
+div[role="main"],
+div[class*="__fb-light-mode"],
+div[class*="x1n2onr6"] {
+  background-color: #000000 !important;
+}
+
+div[aria-label*="messages"],
+div[aria-label*="Messages"],
+div[data-scope="messages_table"] {
+  background-color: #000000 !important;
+}
+
+div[role="complementary"],
+div[aria-label="Chats"] {
+  background-color: #000000 !important;
+}
+
+div[aria-label*="Message"],
+div[contenteditable="true"] {
+  background-color: #1a1a1a !important;
+  color: #ffffff !important;
+  border: 2px solid #ffffff !important;
+}
+
+div[aria-label="Conversation"] [style*="background-color"],
+div[role="article"],
+div[data-visualcompletion="ignore-dynamic"] {
+  background-color: #1a1a1a !important;
+  color: #ffffff !important;
+  border: 1px solid #ffffff !important;
+}
+
+div[role="button"] svg path,
+div[role="button"] svg circle,
+div[role="button"] svg rect {
+  fill: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+/* high contrast message bubbles */
+div[role="row"] {
+  border-bottom: 1px solid #333333 !important;
+}
+
+span[dir="auto"],
+div[dir="auto"] {
+  font-weight: 500 !important;
+}
+
+*::-webkit-scrollbar {
+  width: 12px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #ffffff;
+  border-radius: 0;
+  border: 2px solid #000000;
+}
+*::-webkit-scrollbar-track {
+  background: #000000;
+  border: 1px solid #ffffff;
 }

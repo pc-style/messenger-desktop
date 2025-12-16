@@ -14,17 +14,28 @@ window.addEventListener('DOMContentLoaded', () => {
     (function() {
       const OriginalNotification = window.Notification;
 
-      window.Notification = function(title, options) {
+      // route notifications through Electron only (prevents duplicate system toasts)
+      function ElectronNotification(title, options) {
         if (window.electronNotify) {
           window.electronNotify.send(title, options);
         }
-        return new OriginalNotification(title, options);
-      };
+        // return a minimal stub to satisfy caller expectations
+        return {
+          close: () => {},
+          onclick: null,
+          onclose: null,
+          onerror: null,
+          onshow: null
+        };
+      }
 
-      window.Notification.permission = 'granted';
-      window.Notification.requestPermission = function() {
+      ElectronNotification.permission = 'granted';
+      ElectronNotification.requestPermission = function() {
         return Promise.resolve('granted');
       };
+
+      ElectronNotification.prototype = OriginalNotification ? OriginalNotification.prototype : {};
+      window.Notification = ElectronNotification;
     })();
   `
   document.head.appendChild(script)
@@ -33,4 +44,14 @@ window.addEventListener('DOMContentLoaded', () => {
 // focus window when notification is clicked
 ipcRenderer.on('notification-clicked', () => {
   window.focus()
+})
+
+// schedule send trigger from main process
+ipcRenderer.on('schedule-send', (_, delayMs) => {
+  window.dispatchEvent(new CustomEvent('unleashed-schedule-send', { detail: { delayMs } }))
+})
+
+// config updates (keyword alerts, sanitizer, delays)
+ipcRenderer.on('update-config', (_, config) => {
+  window.dispatchEvent(new CustomEvent('unleashed-config', { detail: config }))
 })
