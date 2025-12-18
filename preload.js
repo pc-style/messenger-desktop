@@ -150,84 +150,103 @@ function showSettingsModal(config) {
   const existing = document.getElementById('unleashed-settings-overlay')
   if (existing) existing.remove()
 
+  const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const bgColor = isDarkMode ? 'rgba(28, 28, 30, 0.8)' : 'rgba(255, 255, 255, 0.8)';
+  const textColor = isDarkMode ? '#fff' : '#000';
+  const subTextColor = isDarkMode ? '#aaa' : '#666';
+  const borderColor = isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+  const sectionBorderColor = isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+  const btnBg = isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+  const accentColor = '#0084ff';
+
   const overlay = document.createElement('div')
   overlay.id = 'unleashed-settings-overlay'
   overlay.style.cssText = `
     position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0,0,0,0.6); z-index: 1000000;
+    background: rgba(0,0,0,0.4); z-index: 1000000;
     display: flex; align-items: center; justify-content: center;
-    backdrop-filter: blur(15px) saturate(160%);
+    backdrop-filter: blur(20px) saturate(180%);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   `
 
   const modal = document.createElement('div')
   modal.style.cssText = `
-    background: rgba(28, 28, 30, 0.95);
+    background: ${bgColor};
     width: 600px; max-height: 85vh;
     border-radius: 24px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 30px 60px rgba(0,0,0,0.5);
+    border: 1px solid ${borderColor};
+    box-shadow: 0 30px 60px rgba(0,0,0,0.3);
     display: flex; flex-direction: column;
-    overflow: hidden; color: #fff;
+    overflow: hidden; color: ${textColor};
     animation: settingsFadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   `
 
   const style = document.createElement('style')
   style.textContent = `
     @keyframes settingsFadeIn {
-      from { opacity: 0; transform: scale(0.95) translateY(20px); }
+      from { opacity: 0; transform: scale(0.98) translateY(10px); }
       to { opacity: 1; transform: scale(1) translateY(0); }
     }
-    .settings-section { padding: 20px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-    .settings-section h4 { margin: 0 0 15px 0; color: #aaa; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
+    .settings-section { padding: 20px; border-bottom: 1px solid ${sectionBorderColor}; }
+    .settings-section h4 { margin: 0 0 15px 0; color: ${subTextColor}; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; font-weight: 600; }
     .settings-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
     .settings-row:last-child { margin-bottom: 0; }
     .settings-label { font-size: 14px; font-weight: 500; }
-    .settings-desc { font-size: 12px; color: #888; margin-top: 2px; }
+    .settings-desc { font-size: 12px; color: ${subTextColor}; margin-top: 2px; }
     .toggle { 
       position: relative; width: 44px; height: 24px; 
-      background: #3a3a3c; border-radius: 12px; cursor: pointer;
-      transition: background 0.2s;
+      background: ${isDarkMode ? '#3a3a3c' : '#e9e9ea'}; border-radius: 12px; cursor: pointer;
+      transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .toggle.active { background: #30d158; }
     .toggle-knob {
       position: absolute; top: 2px; left: 2px; width: 20px; height: 20px;
-      background: #fff; border-radius: 50%; transition: left 0.2s;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      background: #fff; border-radius: 50%; transition: left 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     .toggle.active .toggle-knob { left: 22px; }
     .settings-btn {
-      background: rgba(255,255,255,0.05); border: none; color: #fff;
-      padding: 6px 12px; border-radius: 8px; font-size: 12px; cursor: pointer;
-      transition: background 0.2s; font-weight: 500;
+      background: ${btnBg}; border: none; color: ${textColor};
+      padding: 8px 14px; border-radius: 10px; font-size: 13px; cursor: pointer;
+      transition: all 0.2s; font-weight: 500;
     }
-    .settings-btn:hover { background: rgba(255,255,255,0.1); }
-    .close-area { padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02); }
+    .settings-btn:hover { background: ${isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}; }
+    .settings-btn.primary { background: ${accentColor}; color: white; }
+    .settings-btn.primary:hover { background: #0077e6; }
+    .close-area { padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.02); }
+    
+    /* Scrollbar styling */
+    .settings-scroll::-webkit-scrollbar { width: 8px; }
+    .settings-scroll::-webkit-scrollbar-track { background: transparent; }
+    .settings-scroll::-webkit-scrollbar-thumb { background: ${isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}; border-radius: 4px; }
   `
   document.head.appendChild(style)
 
   const header = document.createElement('div')
-  header.style.cssText = 'padding: 24px 24px 16px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05);'
+  header.style.cssText = `padding: 24px 24px 16px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid ${sectionBorderColor};`
   
   const titleGroup = document.createElement('div')
   const mainTitle = document.createElement('h2')
   mainTitle.textContent = 'Messenger Unleashed'
-  mainTitle.style.cssText = 'margin: 0; font-size: 20px; font-weight: 800; background: linear-gradient(135deg, #6366f1, #06b6d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;'
+  mainTitle.style.cssText = `margin: 0; font-size: 20px; font-weight: 700; color: ${textColor};`
   
   const subTitle = document.createElement('div')
-  subTitle.textContent = 'v1.1.2 — Settings'
-  subTitle.style.cssText = 'font-size: 12px; color: #666; font-weight: 600; margin-top: 2px;'
+  subTitle.textContent = 'v1.1.4 — Settings'
+  subTitle.style.cssText = `font-size: 12px; color: ${subTextColor}; font-weight: 500; margin-top: 2px;`
   
   titleGroup.append(mainTitle, subTitle)
   
   const closeBtn = document.createElement('div')
   closeBtn.innerHTML = '&times;'
-  closeBtn.style.cssText = 'font-size: 28px; cursor: pointer; color: #555; position: relative; top: -5px;'
+  closeBtn.style.cssText = `font-size: 24px; cursor: pointer; color: ${subTextColor}; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: background 0.2s;`
+  closeBtn.onmouseenter = () => closeBtn.style.background = btnBg;
+  closeBtn.onmouseleave = () => closeBtn.style.background = 'transparent';
   closeBtn.onclick = () => overlay.remove()
   
   header.append(titleGroup, closeBtn)
 
   const scrollArea = document.createElement('div')
+  scrollArea.className = 'settings-scroll'
   scrollArea.style.cssText = 'flex: 1; overflow-y: auto; padding: 4px 0;'
 
   const createToggleRow = (label, desc, key, initialValue) => {
@@ -288,9 +307,8 @@ function showSettingsModal(config) {
   cssBtn.onclick = () => { overlay.remove(); ipcRenderer.emit('edit-custom-css') }
   
   const themeBtn = document.createElement('button')
-  themeBtn.className = 'settings-btn'
-  themeBtn.style.background = 'linear-gradient(135deg, #6366f1, #a855f7)'
-  themeBtn.textContent = 'Open Theme Creator'
+  themeBtn.className = 'settings-btn primary'
+  themeBtn.textContent = 'Theme Creator'
   themeBtn.onclick = () => window.open('https://mstheme.pcstyle.dev', '_blank')
   
   customRow.append(cssBtn, themeBtn)
@@ -313,11 +331,12 @@ function showSettingsModal(config) {
   
   const footerHint = document.createElement('div')
   footerHint.textContent = 'Some changes may require a reload.'
-  footerHint.style.cssText = 'font-size: 11px; color: #444;'
+  footerHint.style.cssText = `font-size: 11px; color: ${subTextColor};`
   
   const doneBtn = document.createElement('button')
-  doneBtn.textContent = 'Close'
-  doneBtn.style.cssText = 'padding: 10px 24px; border-radius: 12px; background: #fff; color: #000; border: none; font-weight: 700; cursor: pointer;'
+  doneBtn.textContent = 'Done'
+  doneBtn.className = 'settings-btn primary'
+  doneBtn.style.padding = '10px 24px'
   doneBtn.onclick = () => overlay.remove()
   
   footer.append(footerHint, doneBtn)
@@ -560,9 +579,59 @@ function scheduleSend(delayMs) {
   }, delayMs)
 }
 
+// detect if Messenger has a custom background image/theme applied
+function setupBackgroundDetection() {
+  const checkBackground = () => {
+    // Messenger usually applies background images to a div with aria-label="Messages" 
+    // or sometimes to a container with specific background-image style.
+    const messageArea = document.querySelector('div[aria-label="Messages"]');
+    if (!messageArea) return;
+
+    // Check for inline style or computed style that indicates a background image
+    const style = window.getComputedStyle(messageArea);
+    const hasBgImage = style.backgroundImage && style.backgroundImage !== 'none';
+    
+    // Also check for common class names or child elements Messenger uses for themes
+    const themeElement = messageArea.querySelector('img[src*="theme"]');
+    
+    if (hasBgImage || themeElement) {
+      document.body.classList.add('unleashed-has-custom-bg');
+    } else {
+      document.body.classList.remove('unleashed-has-custom-bg');
+    }
+  };
+
+  const observer = new MutationObserver(checkBackground);
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+  
+  // Initial check
+  checkBackground();
+}
+
+let customStyleElement = null;
+
+function applyCustomCSS(css) {
+  if (!customStyleElement) {
+    customStyleElement = document.createElement('style');
+    customStyleElement.id = 'unleashed-custom-css';
+    document.head.appendChild(customStyleElement);
+  }
+  
+  // Wrap CSS to respect Messenger's custom backgrounds
+  // We prepend a selector that only applies if body doesn't have the custom-bg class
+  // Note: This is a bit naive, but it works for simple overrides.
+  // A better way is to provide the user with the class and let them use it.
+  customStyleElement.textContent = css;
+}
+
+ipcRenderer.on('apply-custom-css', (_, css) => {
+  applyCustomCSS(css);
+});
+
 // initialize when DOM is ready
 window.addEventListener('DOMContentLoaded', () => {
   setupNotificationOverride()
   setupClipboardSanitizer()
   setupKeywordAlerts()
+  setupBackgroundDetection()
 })

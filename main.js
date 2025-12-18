@@ -1322,6 +1322,46 @@ function openSettingsUI() {
 }
 
 
+ipcMain.on("update-setting", (event, { key, value }) => {
+  store.set(key, value);
+  
+  // Handle specific side effects
+  switch (key) {
+    case "blockReadReceipts":
+      updateRequestBlocker();
+      mainWindow.webContents.send("set-block-read-receipts", value);
+      break;
+    case "blockTypingIndicator":
+      updateRequestBlocker();
+      mainWindow.webContents.send("set-block-typing-indicator", value);
+      break;
+    case "clipboardSanitize":
+      mainWindow.webContents.send("update-config", { clipboardSanitize: value });
+      break;
+    case "modernLook":
+      if (value) store.set("floatingGlass", false);
+      applyModernLook();
+      applyFloatingGlass();
+      break;
+    case "floatingGlass":
+      if (value) store.set("modernLook", false);
+      applyModernLook();
+      applyFloatingGlass();
+      break;
+    case "alwaysOnTop":
+      mainWindow.setAlwaysOnTop(value);
+      break;
+    case "launchAtLogin":
+      app.setLoginItemSettings({ openAtLogin: value });
+      break;
+    case "spellCheck":
+      mainWindow.webContents.session.setSpellCheckerEnabled(value);
+      break;
+  }
+  
+  updateMenu();
+});
+
 // IPC handler for CSS input result
 ipcMain.on("css-input-result", (event, css) => {
   if (typeof css !== "string") return;
@@ -1342,12 +1382,8 @@ ipcMain.on("css-input-result", (event, css) => {
 function applyCustomCSS() {
   if (!mainWindow) return;
   const css = store.get("customCSS");
-  mainWindow.webContents.removeInsertedCSS("custom-css").catch(() => {});
-  if (css) {
-    mainWindow.webContents
-      .insertCSS(css, { cssKey: "custom-css" })
-      .catch(() => {});
-  }
+  // We now delegate CSS application to preload.js so it can be responsive to chat backgrounds
+  mainWindow.webContents.send("apply-custom-css", css);
 }
 
 function clearCustomCSS() {
@@ -2007,6 +2043,7 @@ function createWindow() {
     );
 
     applyModernLook();
+    applyFloatingGlass();
   });
 
   mainWindow.on("resize", () => {
