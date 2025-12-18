@@ -1,14 +1,15 @@
 {
   "name": "messenger-unleashed",
   "productName": "Messenger Unleashed",
-  "version": "1.1.2",
+  "version": "1.1.6",
   "description": "Messenger desktop app with extra features",
   "main": "main.js",
   "scripts": {
     "dev": "electron .",
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win"
+    "build:win": "electron-builder --win",
+    "bump": "node scripts/bump.js"
   },
   "dependencies": {
     "electron-store": "^8.1.0"
@@ -22,11 +23,17 @@
     "productName": "Messenger Unleashed",
     "mac": {
       "category": "public.app-category.social-networking",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "icon": "icon.icns"
     },
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "icon.ico"
     },
     "nsis": {
@@ -36,8 +43,16 @@
     "dmg": {
       "title": "Messenger Unleashed",
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "files": [
