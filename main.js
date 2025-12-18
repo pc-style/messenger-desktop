@@ -827,7 +827,7 @@ async function checkForUpdates() {
             .then(({ response }) => {
               if (response === 0) {
                 shell.openExternal(
-                  "https://github.com/pcstyle/messenger-desktop/releases"
+                  "https://github.com/pc-style/messenger-desktop/releases"
                 );
               }
             });
