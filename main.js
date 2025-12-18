@@ -131,40 +131,115 @@ function isTypingIndicatorPayload(body) {
   return false;
 }
 
-function updateTypingBlocker(enabled) {
+// URL patterns for blocking read receipts
+const READ_RECEIPT_URL_PATTERNS = [
+  /\/ajax\/mercury\/change_read_status\.php/i,
+  /\/ajax\/mercury\/mark_seen\.php/i,
+  /\/ajax\/mercury\/delivery_receipts\.php/i,
+  /\/webgraphql\/mutation.*MarkThreadRead/i,
+  /\/graphql.*mark.*read/i,
+  /\/graphql.*mark.*seen/i,
+];
+
+// URL patterns for blocking typing indicators
+const TYPING_URL_PATTERNS = [
+  /\/ajax\/messaging\/typ\.php/i,
+  /\/ajax\/mercury\/type\.php/i,
+  /\/ajax\/mercury\/send_message_typing\.php/i,
+  /\/webgraphql\/mutation.*SendTypingIndicator/i,
+  /\/graphql.*typing/i,
+  /-edge-chat\.facebook\.com/i,
+  /-edge-chat\.messenger\.com/i,
+];
+
+// Global request blocker handler
+let requestBlockerHandler = null;
+
+function shouldBlockReadReceipt(url, body) {
+  // Check URL patterns first (most reliable)
+  for (const pattern of READ_RECEIPT_URL_PATTERNS) {
+    if (pattern.test(url)) return true;
+  }
+  
+  // Check body for GraphQL mutations related to read status
+  if (body) {
+    const lower = body.toLowerCase();
+    if (
+      (lower.includes("markread") || lower.includes("mark_read") || lower.includes("markseen") || lower.includes("mark_seen")) &&
+      (lower.includes("mutation") || lower.includes("graphql") || lower.includes("thread"))
+    ) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+function shouldBlockTyping(url, body) {
+  // Check URL patterns first (most reliable)
+  for (const pattern of TYPING_URL_PATTERNS) {
+    if (pattern.test(url)) return true;
+  }
+  
+  // Also check body for typing-related data
+  if (body) {
+    // Check if payload contains typing indicators
+    if (isTypingIndicatorPayload(body)) return true;
+  }
+  
+  return false;
+}
+
+function updateRequestBlocker() {
+  const blockReadReceipts = store.get("blockReadReceipts");
+  const blockTypingIndicator = store.get("blockTypingIndicator");
+  
   const filter = {
-    urls: ["https://*.messenger.com/*", "https://*.facebook.com/*"],
+    urls: [
+      "https://*.messenger.com/*",
+      "https://*.facebook.com/*",
+      "https://*-edge-chat.facebook.com/*",
+      "https://*-edge-chat.messenger.com/*",
+    ],
   };
 
-  if (enabled && !typingBlockerHandler) {
-    typingBlockerHandler = (details, callback) => {
-      if (details.method !== "POST") return callback({});
-      const body = getRequestBody(details);
-      if (isTypingIndicatorPayload(body)) {
+  // Remove existing handler if any
+  if (requestBlockerHandler) {
+    try {
+      session.defaultSession.webRequest.onBeforeRequest(filter, null);
+    } catch (_) {}
+    requestBlockerHandler = null;
+  }
+
+  // Only install handler if at least one blocking feature is enabled
+  if (blockReadReceipts || blockTypingIndicator) {
+    requestBlockerHandler = (details, callback) => {
+      const url = details.url || "";
+      const body = details.method === "POST" ? getRequestBody(details) : "";
+      
+      // Check read receipts blocking
+      if (blockReadReceipts && shouldBlockReadReceipt(url, body)) {
+        console.log("[Unleashed] Blocked read receipt:", url.slice(0, 100));
         return callback({ cancel: true });
       }
+      
+      // Check typing indicator blocking
+      if (blockTypingIndicator && shouldBlockTyping(url, body)) {
+        console.log("[Unleashed] Blocked typing indicator:", url.slice(0, 100));
+        return callback({ cancel: true });
+      }
+      
       return callback({});
     };
-    session.defaultSession.webRequest.onBeforeRequest(
-      filter,
-      typingBlockerHandler
-    );
-  } else if (!enabled && typingBlockerHandler) {
-    if (typeof session.defaultSession.webRequest.off === "function") {
-      session.defaultSession.webRequest.off(
-        "onBeforeRequest",
-        typingBlockerHandler
-      );
-    } else if (
-      typeof session.defaultSession.webRequest.removeListener === "function"
-    ) {
-      session.defaultSession.webRequest.removeListener(
-        "onBeforeRequest",
-        typingBlockerHandler
-      );
-    }
-    typingBlockerHandler = null;
+    
+    session.defaultSession.webRequest.onBeforeRequest(filter, requestBlockerHandler);
   }
+}
+
+// Legacy function kept for compatibility, now delegates to unified handler
+function updateTypingBlocker(enabled) {
+  store.set("blockTypingIndicator", enabled);
+  updateRequestBlocker();
 }
 
 function escapeHTML(value) {
@@ -568,7 +643,10 @@ function toggleBlockReadReceipts() {
 
   if (!mainWindow) return;
 
-  // notify preload to update visibility blocking state
+  // Update the unified request blocker
+  updateRequestBlocker();
+
+  // notify preload to update visibility blocking state (additional layer)
   mainWindow.webContents.send("set-block-read-receipts", newValue);
 
   if (!newValue) {
@@ -698,7 +776,9 @@ function toggleBlockTypingIndicator() {
   const current = store.get("blockTypingIndicator");
   const newValue = !current;
   store.set("blockTypingIndicator", newValue);
-  updateTypingBlocker(newValue);
+  
+  // Update the unified request blocker
+  updateRequestBlocker();
 
   if (!mainWindow) return;
 
@@ -860,59 +940,206 @@ function applyModernLook() {
   mainWindow.webContents.removeInsertedCSS("modern-look").catch(() => {});
 
   if (enabled) {
-    // These rules aim for the modern look in the image: rounded corners, floating elements, etc.
+    // Premium modern look with glassmorphism floating panels
     const modernCSS = `
       :root {
-        --modern-radius: 16px !important;
-        --modern-spacing: 12px !important;
+        --modern-radius: 20px !important;
+        --modern-spacing: 10px !important;
+        --modern-bg: rgba(24, 24, 27, 0.85) !important;
+        --modern-border: rgba(255, 255, 255, 0.08) !important;
+        --modern-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+        --modern-glow: 0 0 40px rgba(99, 102, 241, 0.15) !important;
       }
       
-      /* Rounded main containers */
-      div[role="main"], 
-      div[aria-label="Chats"], 
-      div[role="navigation"] {
+      /* Global dark canvas */
+      html {
+        background: linear-gradient(135deg, #0a0a0f 0%, #111118 50%, #0d0d14 100%) !important;
+      }
+      
+      body {
+        background: transparent !important;
+        padding: var(--modern-spacing) !important;
+        min-height: 100vh !important;
+      }
+
+      /* Main container wrapper */
+      body > div:first-child,
+      #root,
+      div[role="main"].__fb-light-mode,
+      div.__fb-light-mode {
+        background: transparent !important;
+      }
+
+      /* Left icon sidebar - floating pill */
+      div[role="navigation"]:first-of-type,
+      div[aria-label="Messenger"] > div > div:first-child {
+        background: var(--modern-bg) !important;
+        backdrop-filter: blur(20px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
         border-radius: var(--modern-radius) !important;
         margin: var(--modern-spacing) !important;
+        margin-right: 0 !important;
+        border: 1px solid var(--modern-border) !important;
+        box-shadow: var(--modern-shadow) !important;
         overflow: hidden !important;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
       }
 
-      /* Compact and rounded left sidebar icons */
-      div[role="navigation"] a, 
+      /* Sidebar icons styling */
+      div[role="navigation"] a,
       div[role="navigation"] div[role="button"] {
-        border-radius: 50% !important;
-        margin: 8px auto !important;
+        border-radius: 14px !important;
+        margin: 6px 8px !important;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+      }
+      
+      div[role="navigation"] a:hover,
+      div[role="navigation"] div[role="button"]:hover {
+        background: rgba(255, 255, 255, 0.1) !important;
+        transform: scale(1.05) !important;
       }
 
-      /* Rounded search bar */
-      input[aria-label="Search Messenger"], 
-      input[placeholder*="Search"] {
-        border-radius: 20px !important;
-        padding: 8px 16px !important;
+      /* Chat list panel - floating card */
+      div[aria-label="Chats"],
+      div[aria-label="Chats"] > div {
+        background: var(--modern-bg) !important;
+        backdrop-filter: blur(20px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+        border-radius: var(--modern-radius) !important;
+        margin: var(--modern-spacing) !important;
+        margin-left: 5px !important;
+        margin-right: 0 !important;
+        border: 1px solid var(--modern-border) !important;
+        box-shadow: var(--modern-shadow) !important;
+        overflow: hidden !important;
       }
 
-      /* Rounded message bubbles */
-      div[role="row"] div[style*="border-radius"] {
+      /* Main conversation area - floating card */
+      div[role="main"] {
+        background: var(--modern-bg) !important;
+        backdrop-filter: blur(20px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+        border-radius: var(--modern-radius) !important;
+        margin: var(--modern-spacing) !important;
+        margin-left: 5px !important;
+        border: 1px solid var(--modern-border) !important;
+        box-shadow: var(--modern-shadow), var(--modern-glow) !important;
+        overflow: hidden !important;
+      }
+
+      /* Messages container */
+      div[aria-label="Messages"] {
+        background: transparent !important;
+      }
+
+      /* Search bar - pill shape with glow */
+      input[aria-label="Search Messenger"],
+      input[placeholder*="Search"],
+      div[aria-label="Search Messenger"] {
+        border-radius: 24px !important;
+        padding: 10px 18px !important;
+        background: rgba(255, 255, 255, 0.05) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        transition: all 0.3s ease !important;
+      }
+      
+      input[aria-label="Search Messenger"]:focus,
+      input[placeholder*="Search"]:focus {
+        background: rgba(255, 255, 255, 0.08) !important;
+        border-color: rgba(99, 102, 241, 0.5) !important;
+        box-shadow: 0 0 20px rgba(99, 102, 241, 0.2) !important;
+      }
+
+      /* Chat list items - subtle hover glow */
+      div[aria-label="Chats"] a,
+      div[role="listitem"],
+      div[role="row"] {
+        border-radius: 12px !important;
+        margin: 2px 6px !important;
+        transition: all 0.2s ease !important;
+      }
+      
+      div[aria-label="Chats"] a:hover {
+        background: rgba(255, 255, 255, 0.06) !important;
+      }
+
+      /* Message bubbles - softer, modern look */
+      div[role="row"] div[style*="border-radius"],
+      div[role="none"] > div > div[dir="auto"] {
         border-radius: 18px !important;
+        transition: transform 0.15s ease !important;
       }
 
-      /* Floating effect for the whole app content if possible */
-      body {
-        background-color: #000 !important;
-        padding: 4px !important;
+      /* Header bar in chat */
+      div[role="banner"],
+      div[aria-label="Conversation actions"] {
+        background: transparent !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
       }
 
-      /* Modern scrollbars */
+      /* Message input area */
+      div[aria-label="Message"],
+      div[contenteditable="true"] {
+        border-radius: 20px !important;
+      }
+
+      /* Emoji/gif/attachment buttons */
+      div[aria-label="Choose an emoji"] button,
+      div[aria-label="Attach a file"] button {
+        border-radius: 50% !important;
+        transition: all 0.2s ease !important;
+      }
+      
+      div[aria-label="Choose an emoji"] button:hover,
+      div[aria-label="Attach a file"] button:hover {
+        background: rgba(255, 255, 255, 0.1) !important;
+        transform: scale(1.1) !important;
+      }
+
+      /* Sleek scrollbars */
       ::-webkit-scrollbar {
         width: 6px !important;
         height: 6px !important;
       }
       ::-webkit-scrollbar-thumb {
-        background: rgba(255, 255, 255, 0.2) !important;
+        background: rgba(255, 255, 255, 0.15) !important;
         border-radius: 10px !important;
+        transition: background 0.2s ease !important;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.25) !important;
       }
       ::-webkit-scrollbar-track {
         background: transparent !important;
+      }
+
+      /* Subtle animations */
+      @keyframes float-in {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      div[role="main"],
+      div[aria-label="Chats"],
+      div[role="navigation"] {
+        animation: float-in 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+      }
+
+      /* Remove any harsh edges */
+      * {
+        outline: none !important;
+      }
+
+      /* Accent color enhancement for active elements */
+      a[aria-current="page"],
+      div[aria-selected="true"] {
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.15) 100%) !important;
+        border-left: 3px solid #6366f1 !important;
       }
     `;
     mainWindow.webContents
@@ -1560,8 +1787,8 @@ function createWindow() {
     }
   );
 
-  // apply typing blocker before loading content if enabled
-  updateTypingBlocker(store.get("blockTypingIndicator"));
+  // apply request blockers before loading content (read receipts + typing indicator)
+  updateRequestBlocker();
 
   mainWindow.loadURL("https://www.messenger.com");
 
