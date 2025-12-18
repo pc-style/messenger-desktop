@@ -1,147 +1,195 @@
-const { app, BrowserWindow, session, Menu, ipcMain, Notification, dialog, nativeImage } = require('electron')
-const path = require('path')
-const fs = require('fs')
-const Store = require('electron-store')
+const {
+  app,
+  BrowserWindow,
+  session,
+  Menu,
+  ipcMain,
+  Notification,
+  dialog,
+  nativeImage,
+  shell,
+} = require("electron");
+const path = require("path");
+const fs = require("fs");
+const Store = require("electron-store");
 
 const store = new Store({
   defaults: {
     alwaysOnTop: false,
-    theme: 'default',
+    theme: "default",
     doNotDisturb: false,
     windowBounds: { width: 1200, height: 800 },
     launchAtLogin: false,
     focusMode: false,
     quickReplies: [
-      { key: '1', text: 'On my way!' },
-      { key: '2', text: 'Be right back' },
-      { key: '3', text: 'Sounds good!' }
+      { key: "1", text: "On my way!" },
+      { key: "2", text: "Be right back" },
+      { key: "3", text: "Sounds good!" },
     ],
     menuBarMode: false,
     blockReadReceipts: false,
     spellCheck: true,
-    keywordAlerts: ['urgent', 'asap'],
+    keywordAlerts: ["urgent", "asap"],
     keywordAlertsEnabled: true,
     clipboardSanitize: true,
     scheduleDelayMs: 30000,
     blockTypingIndicator: false,
     windowOpacity: 1.0,
-    customCSS: ''
-  }
-})
+    customCSS: "",
+  },
+});
 
-const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+const USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-let mainWindow = null
-let pipWindow = null
-let tray = null
-let unreadCount = 0
-let typingBlockerHandler = null
+let mainWindow = null;
+let pipWindow = null;
+let tray = null;
+let unreadCount = 0;
+let typingBlockerHandler = null;
 
 // combine uploaded body buffers into string
 function getRequestBody(details) {
-  const { uploadData } = details
-  if (!uploadData || !uploadData.length) return ''
+  const { uploadData } = details;
+  if (!uploadData || !uploadData.length) return "";
   try {
-    return uploadData.map(part => {
-      if (part.bytes) {
-        return Buffer.from(part.bytes).toString()
-      }
-      if (part.file) {
-        try { return fs.readFileSync(part.file, 'utf8') } catch (_) { return '' }
-      }
-      return ''
-    }).join('')
+    return uploadData
+      .map((part) => {
+        if (part.bytes) {
+          return Buffer.from(part.bytes).toString();
+        }
+        if (part.file) {
+          try {
+            return fs.readFileSync(part.file, "utf8");
+          } catch (_) {
+            return "";
+          }
+        }
+        return "";
+      })
+      .join("");
   } catch (_) {
-    return ''
+    return "";
   }
 }
 
 function isTypingIndicatorPayload(body) {
-  if (!body || typeof body !== 'string') return false
+  if (!body || typeof body !== "string") return false;
 
   const tryJSON = (value) => {
-    try { return JSON.parse(value) } catch (_) { return null }
-  }
+    try {
+      return JSON.parse(value);
+    } catch (_) {
+      return null;
+    }
+  };
 
   // URL-encoded GraphQL batch: queries=[{...}]
-  const params = new URLSearchParams(body)
-  if (params.has('is_typing')) {
-    const v = params.get('is_typing')
-    if (v === 'true' || v === '1') return true
+  const params = new URLSearchParams(body);
+  if (params.has("is_typing")) {
+    const v = params.get("is_typing");
+    if (v === "true" || v === "1") return true;
   }
-  if (params.has('typing')) {
-    const v = params.get('typing')
-    if (v === 'true' || v === '1') return true
+  if (params.has("typing")) {
+    const v = params.get("typing");
+    if (v === "true" || v === "1") return true;
   }
-  if (params.has('queries')) {
-    const parsed = tryJSON(params.get('queries'))
+  if (params.has("queries")) {
+    const parsed = tryJSON(params.get("queries"));
     if (Array.isArray(parsed)) {
-      const hit = parsed.some(entry => {
-        const vars = entry?.variables || entry?.params?.variables
-        return vars?.is_typing === true || vars?.typing === true
-      })
-      if (hit) return true
+      const hit = parsed.some((entry) => {
+        const vars = entry?.variables || entry?.params?.variables;
+        return vars?.is_typing === true || vars?.typing === true;
+      });
+      if (hit) return true;
     }
   }
 
   // raw JSON (GraphQL or REST)
-  const json = tryJSON(body)
+  const json = tryJSON(body);
   if (json) {
     if (Array.isArray(json)) {
-      if (json.some(item => item?.variables?.is_typing === true || item?.variables?.typing === true)) return true
-    } else if (json.variables?.is_typing === true || json.is_typing === true || json.typing === true) {
-      return true
+      if (
+        json.some(
+          (item) =>
+            item?.variables?.is_typing === true ||
+            item?.variables?.typing === true
+        )
+      )
+        return true;
+    } else if (
+      json.variables?.is_typing === true ||
+      json.is_typing === true ||
+      json.typing === true
+    ) {
+      return true;
     }
   }
 
-  return false
+  return false;
 }
 
 function updateTypingBlocker(enabled) {
   const filter = {
-    urls: [
-      'https://*.messenger.com/*',
-      'https://*.facebook.com/*'
-    ]
-  }
+    urls: ["https://*.messenger.com/*", "https://*.facebook.com/*"],
+  };
 
   if (enabled && !typingBlockerHandler) {
     typingBlockerHandler = (details, callback) => {
-      if (details.method !== 'POST') return callback({})
-      const body = getRequestBody(details)
+      if (details.method !== "POST") return callback({});
+      const body = getRequestBody(details);
       if (isTypingIndicatorPayload(body)) {
-        return callback({ cancel: true })
+        return callback({ cancel: true });
       }
-      return callback({})
-    }
-    session.defaultSession.webRequest.onBeforeRequest(filter, typingBlockerHandler)
+      return callback({});
+    };
+    session.defaultSession.webRequest.onBeforeRequest(
+      filter,
+      typingBlockerHandler
+    );
   } else if (!enabled && typingBlockerHandler) {
-    if (typeof session.defaultSession.webRequest.off === 'function') {
-      session.defaultSession.webRequest.off('onBeforeRequest', typingBlockerHandler)
-    } else if (typeof session.defaultSession.webRequest.removeListener === 'function') {
-      session.defaultSession.webRequest.removeListener('onBeforeRequest', typingBlockerHandler)
+    if (typeof session.defaultSession.webRequest.off === "function") {
+      session.defaultSession.webRequest.off(
+        "onBeforeRequest",
+        typingBlockerHandler
+      );
+    } else if (
+      typeof session.defaultSession.webRequest.removeListener === "function"
+    ) {
+      session.defaultSession.webRequest.removeListener(
+        "onBeforeRequest",
+        typingBlockerHandler
+      );
     }
-    typingBlockerHandler = null
+    typingBlockerHandler = null;
   }
 }
 
 function escapeHTML(value) {
-  return (value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
+  return (value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function isSafeCSS(css) {
-  const dangerous = /<script|javascript:|expression\s*\(|@import\s+url|behavior\s*:/i
-  return !dangerous.test(css)
+  const dangerous =
+    /<script|javascript:|expression\s*\(|@import\s+url|behavior\s*:/i;
+  return !dangerous.test(css);
 }
 
-async function openInputDialog({ title, message, defaultValue = '', multiline = false }) {
+async function openInputDialog({
+  title,
+  message,
+  defaultValue = "",
+  multiline = false,
+}) {
   return new Promise((resolve) => {
-    const channel = `dialog-result-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    const channel = `dialog-result-${Date.now()}-${Math.random()
+      .toString(16)
+      .slice(2)}`;
 
     const inputWindow = new BrowserWindow({
       width: 420,
@@ -154,13 +202,13 @@ async function openInputDialog({ title, message, defaultValue = '', multiline = 
       maximizable: false,
       autoHideMenuBar: true,
       webPreferences: {
-        preload: path.join(__dirname, 'dialog-preload.js'),
+        preload: path.join(__dirname, "dialog-preload.js"),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
-        additionalArguments: [`--dialog-channel=${channel}`]
-      }
-    })
+        additionalArguments: [`--dialog-channel=${channel}`],
+      },
+    });
 
     const html = `<!DOCTYPE html>
       <html>
@@ -179,9 +227,15 @@ async function openInputDialog({ title, message, defaultValue = '', multiline = 
         </style>
       </head>
       <body>
-        <h3>${escapeHTML(title || 'Input')}</h3>
-        <p>${escapeHTML(message || 'Enter a value:')}</p>
-        ${multiline ? `<textarea id="input">${escapeHTML(defaultValue)}</textarea>` : `<input type="text" id="input" value="${escapeHTML(defaultValue)}" />`}
+        <h3>${escapeHTML(title || "Input")}</h3>
+        <p>${escapeHTML(message || "Enter a value:")}</p>
+        ${
+          multiline
+            ? `<textarea id="input">${escapeHTML(defaultValue)}</textarea>`
+            : `<input type="text" id="input" value="${escapeHTML(
+                defaultValue
+              )}" />`
+        }
         <div class="buttons">
           <button class="cancel" onclick="window.dialogAPI.cancel()">Cancel</button>
           <button class="ok" onclick="window.dialogAPI.submit(document.getElementById('input').value)">OK</button>
@@ -196,171 +250,188 @@ async function openInputDialog({ title, message, defaultValue = '', multiline = 
           });
         </script>
       </body>
-      </html>`
+      </html>`;
 
     ipcMain.once(channel, (_, value) => {
-      if (!inputWindow.isDestroyed()) inputWindow.close()
-      resolve(value ?? null)
-    })
+      if (!inputWindow.isDestroyed()) inputWindow.close();
+      resolve(value ?? null);
+    });
 
-    inputWindow.on('closed', () => {
-      resolve(null)
-    })
+    inputWindow.on("closed", () => {
+      resolve(null);
+    });
 
-    inputWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+    inputWindow.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+    );
 
-    inputWindow.once('ready-to-show', () => {
-      inputWindow.show()
-    })
-  })
+    inputWindow.once("ready-to-show", () => {
+      inputWindow.show();
+    });
+  });
 }
 
 // get platform-appropriate icon path
 function getIconPath() {
-  const iconName = process.platform === 'win32' ? 'icon.ico' :
-                   process.platform === 'darwin' ? 'icon.icns' : 'icon.png'
-  const iconPath = path.join(__dirname, iconName)
-  if (fs.existsSync(iconPath)) return iconPath
+  const iconName =
+    process.platform === "win32"
+      ? "icon.ico"
+      : process.platform === "darwin"
+      ? "icon.icns"
+      : "icon.png";
+  const iconPath = path.join(__dirname, iconName);
+  if (fs.existsSync(iconPath)) return iconPath;
   // fallback to any available icon
-  for (const ext of ['png', 'ico', 'icns']) {
-    const fallback = path.join(__dirname, `icon.${ext}`)
-    if (fs.existsSync(fallback)) return fallback
+  for (const ext of ["png", "ico", "icns"]) {
+    const fallback = path.join(__dirname, `icon.${ext}`);
+    if (fs.existsSync(fallback)) return fallback;
   }
-  return null
+  return null;
 }
 
 // handle native notifications from renderer
-ipcMain.on('show-notification', (event, data) => {
-  if (store.get('doNotDisturb')) return
+ipcMain.on("show-notification", (event, data) => {
+  if (store.get("doNotDisturb")) return;
 
-  const iconPath = getIconPath()
+  const iconPath = getIconPath();
   const notification = new Notification({
-    title: data.title || 'Messenger',
-    body: data.body || '',
+    title: data.title || "Messenger",
+    body: data.body || "",
     silent: data.silent || false,
-    ...(iconPath && { icon: iconPath })
-  })
+    ...(iconPath && { icon: iconPath }),
+  });
 
-  notification.on('click', () => {
+  notification.on("click", () => {
     if (mainWindow) {
-      mainWindow.show()
-      mainWindow.focus()
+      mainWindow.show();
+      mainWindow.focus();
     }
-    event.sender.send('notification-clicked')
-  })
+    event.sender.send("notification-clicked");
+  });
 
-  notification.show()
-})
+  notification.show();
+});
 
 // IPC handlers for dialogs (replacing prompt()) - backed by sandboxed modal window
-ipcMain.handle('show-input-dialog', async (event, { title, message, defaultValue, multiline = false }) => {
-  return openInputDialog({ title, message, defaultValue, multiline })
-})
+ipcMain.handle(
+  "show-input-dialog",
+  async (event, { title, message, defaultValue, multiline = false }) => {
+    return openInputDialog({ title, message, defaultValue, multiline });
+  }
+);
 
 // IPC handler for CSS validation and application
-ipcMain.handle('validate-css', (event, css) => {
+ipcMain.handle("validate-css", (event, css) => {
   // basic CSS validation - check for script injection attempts
   if (!isSafeCSS(css)) {
-    return { valid: false, error: 'CSS contains potentially dangerous content' }
+    return {
+      valid: false,
+      error: "CSS contains potentially dangerous content",
+    };
   }
-  return { valid: true }
-})
+  return { valid: true };
+});
 
 function getThemeCSS(theme) {
-  const themesPath = path.join(__dirname, 'themes.css')
-  const allCSS = fs.readFileSync(themesPath, 'utf8')
+  const themesPath = path.join(__dirname, "themes.css");
+  const allCSS = fs.readFileSync(themesPath, "utf8");
 
-  if (theme === 'default') return ''
+  if (theme === "default") return "";
 
-  const themeRegex = new RegExp(`\\/\\* ${theme} \\*\\/([\\s\\S]*?)(?=\\/\\* \\w+ \\*\\/|$)`)
-  const match = allCSS.match(themeRegex)
-  return match ? match[1] : ''
+  const themeRegex = new RegExp(
+    `\\/\\* ${theme} \\*\\/([\\s\\S]*?)(?=\\/\\* \\w+ \\*\\/|$)`
+  );
+  const match = allCSS.match(themeRegex);
+  return match ? match[1] : "";
 }
 
 function applyThemeCSS(theme) {
-  if (!mainWindow) return
+  if (!mainWindow) return;
 
-  const css = getThemeCSS(theme)
-  mainWindow.webContents.removeInsertedCSS('theme').catch(() => {})
+  const css = getThemeCSS(theme);
+  mainWindow.webContents.removeInsertedCSS("theme").catch(() => {});
 
   if (css) {
-    mainWindow.webContents.insertCSS(css, { cssKey: 'theme' }).catch(() => {})
+    mainWindow.webContents.insertCSS(css, { cssKey: "theme" }).catch(() => {});
   }
 }
 
 function applyTheme(theme) {
-  if (!mainWindow) return
+  if (!mainWindow) return;
 
-  store.set('theme', theme)
-  updateMenu()
+  store.set("theme", theme);
+  updateMenu();
 
-  mainWindow.webContents.reloadIgnoringCache()
+  mainWindow.webContents.reloadIgnoringCache();
 }
 
 function toggleAlwaysOnTop() {
-  const current = store.get('alwaysOnTop')
-  store.set('alwaysOnTop', !current)
-  mainWindow.setAlwaysOnTop(!current)
-  updateMenu()
+  const current = store.get("alwaysOnTop");
+  store.set("alwaysOnTop", !current);
+  mainWindow.setAlwaysOnTop(!current);
+  updateMenu();
 }
 
 function toggleDoNotDisturb() {
-  const current = store.get('doNotDisturb')
-  store.set('doNotDisturb', !current)
-  updateMenu()
+  const current = store.get("doNotDisturb");
+  store.set("doNotDisturb", !current);
+  updateMenu();
 }
 
 function toggleLaunchAtLogin() {
-  const current = store.get('launchAtLogin')
-  const newValue = !current
+  const current = store.get("launchAtLogin");
+  const newValue = !current;
 
   const canSetLogin =
-    process.platform !== 'darwin' ||
-    (app.isInApplicationsFolder && app.isInApplicationsFolder())
+    process.platform !== "darwin" ||
+    (app.isInApplicationsFolder && app.isInApplicationsFolder());
 
   if (canSetLogin) {
     try {
       app.setLoginItemSettings({
         openAtLogin: newValue,
-        openAsHidden: false
-      })
+        openAsHidden: false,
+      });
     } catch (err) {
-      console.warn('Failed to set login item', err)
+      console.warn("Failed to set login item", err);
     }
   }
 
-  store.set('launchAtLogin', newValue)
-  updateMenu()
+  store.set("launchAtLogin", newValue);
+  updateMenu();
 }
 
 function toggleFocusMode() {
-  const current = store.get('focusMode')
-  const newValue = !current
-  store.set('focusMode', newValue)
+  const current = store.get("focusMode");
+  const newValue = !current;
+  store.set("focusMode", newValue);
 
-  if (!mainWindow) return
+  if (!mainWindow) return;
 
   if (newValue) {
-    mainWindow.webContents.insertCSS(`
+    mainWindow.webContents.insertCSS(
+      `
       div[aria-label="Chats"],
       div[role="navigation"] { display: none !important; }
       div[role="main"] { width: 100% !important; max-width: 100% !important; }
-    `, { cssKey: 'focus-mode' })
+    `,
+      { cssKey: "focus-mode" }
+    );
   } else {
-    mainWindow.webContents.reloadIgnoringCache()
+    mainWindow.webContents.reloadIgnoringCache();
   }
 
-  updateMenu()
+  updateMenu();
 }
 
 function reloadMessenger() {
-  if (!mainWindow) return
-  mainWindow.webContents.reloadIgnoringCache()
+  if (!mainWindow) return;
+  mainWindow.webContents.reloadIgnoringCache();
 }
 
 // modern text insertion using InputEvent instead of deprecated execCommand
 function sendQuickReply(text) {
-  if (!mainWindow) return
+  if (!mainWindow) return;
   mainWindow.webContents.executeJavaScript(`
     (function() {
       const input = document.querySelector('[contenteditable="true"][role="textbox"]');
@@ -386,127 +457,131 @@ function sendQuickReply(text) {
       selection.addRange(range);
 
       // dispatch input event to trigger React state update
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${JSON.stringify(text)} }));
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${JSON.stringify(
+        text
+      )} }));
 
       // simulate Enter key
       const enterEvent = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true });
       input.dispatchEvent(enterEvent);
       return true;
     })()
-  `)
+  `);
 }
 
 function toggleMenuBarMode() {
-  const current = store.get('menuBarMode')
-  const newValue = !current
-  store.set('menuBarMode', newValue)
+  const current = store.get("menuBarMode");
+  const newValue = !current;
+  store.set("menuBarMode", newValue);
 
   if (newValue) {
-    const success = createTray()
+    const success = createTray();
     if (success && mainWindow) {
-      mainWindow.setSkipTaskbar(true)
-      mainWindow.hide()
-      if (process.platform === 'darwin' && app.dock) app.dock.hide()
+      mainWindow.setSkipTaskbar(true);
+      mainWindow.hide();
+      if (process.platform === "darwin" && app.dock) app.dock.hide();
     }
     if (!success) {
-      store.set('menuBarMode', false)
-      dialog.showErrorBox('Menu Bar Mode', 'Failed to create tray icon.')
+      store.set("menuBarMode", false);
+      dialog.showErrorBox("Menu Bar Mode", "Failed to create tray icon.");
     }
   } else {
     if (tray) {
-      tray.destroy()
-      tray = null
+      tray.destroy();
+      tray = null;
     }
     if (mainWindow) {
-      mainWindow.setSkipTaskbar(false)
-      mainWindow.show()
-      mainWindow.focus()
+      mainWindow.setSkipTaskbar(false);
+      mainWindow.show();
+      mainWindow.focus();
     }
-    if (process.platform === 'darwin' && app.dock) app.dock.show()
+    if (process.platform === "darwin" && app.dock) app.dock.show();
   }
 
-  updateMenu()
+  updateMenu();
 }
 
 function createTray() {
-  if (tray) return true
+  if (tray) return true;
 
-  const { Tray } = require('electron')
+  const { Tray } = require("electron");
 
   try {
     // prefer the pre-sized tray PNG, fall back to platform-specific icon
-    let iconPath = path.join(__dirname, 'trayIcon.png')
+    let iconPath = path.join(__dirname, "trayIcon.png");
     if (!fs.existsSync(iconPath)) {
-      iconPath = getIconPath()
+      iconPath = getIconPath();
     }
 
     if (!iconPath || !fs.existsSync(iconPath)) {
-      console.error('No icon file found for tray')
-      return false
+      console.error("No icon file found for tray");
+      return false;
     }
 
-    const trayIcon = nativeImage.createFromPath(iconPath)
+    const trayIcon = nativeImage.createFromPath(iconPath);
     if (trayIcon.isEmpty()) {
-      console.error('Failed to load tray icon from:', iconPath)
-      return false
+      console.error("Failed to load tray icon from:", iconPath);
+      return false;
     }
 
-    const resized = trayIcon.resize({ width: 16, height: 16 })
-    if (process.platform === 'darwin') resized.setTemplateImage(true)
+    const resized = trayIcon.resize({ width: 16, height: 16 });
+    if (process.platform === "darwin") resized.setTemplateImage(true);
 
-    tray = new Tray(resized)
-    tray.setToolTip('Messenger Unleashed')
-    if (tray.setTitle) tray.setTitle(unreadCount > 0 ? ` ${unreadCount}` : '')
+    tray = new Tray(resized);
+    tray.setToolTip("Messenger Unleashed");
+    if (tray.setTitle) tray.setTitle(unreadCount > 0 ? ` ${unreadCount}` : "");
 
-    tray.on('click', () => {
+    tray.on("click", () => {
       if (mainWindow) {
         if (mainWindow.isVisible()) {
-          mainWindow.hide()
-          if (process.platform === 'darwin' && app.dock) app.dock.hide()
+          mainWindow.hide();
+          if (process.platform === "darwin" && app.dock) app.dock.hide();
         } else {
-          mainWindow.show()
-          mainWindow.focus()
-          if (process.platform === 'darwin' && app.dock) app.dock.show()
+          mainWindow.show();
+          mainWindow.focus();
+          if (process.platform === "darwin" && app.dock) app.dock.show();
         }
       }
-    })
+    });
 
-    tray.on('right-click', () => {
+    tray.on("right-click", () => {
       if (mainWindow) {
-        mainWindow.show()
-        mainWindow.focus()
-        if (process.platform === 'darwin' && app.dock) app.dock.show()
+        mainWindow.show();
+        mainWindow.focus();
+        if (process.platform === "darwin" && app.dock) app.dock.show();
       }
-    })
+    });
 
-    return true
+    return true;
   } catch (err) {
-    console.error('Failed to create tray:', err)
-    return false
+    console.error("Failed to create tray:", err);
+    return false;
   }
 }
 
 function toggleBlockReadReceipts() {
-  const current = store.get('blockReadReceipts')
-  const newValue = !current
-  store.set('blockReadReceipts', newValue)
+  const current = store.get("blockReadReceipts");
+  const newValue = !current;
+  store.set("blockReadReceipts", newValue);
 
-  if (!mainWindow) return
+  if (!mainWindow) return;
 
   // notify preload to update visibility blocking state
-  mainWindow.webContents.send('set-block-read-receipts', newValue)
+  mainWindow.webContents.send("set-block-read-receipts", newValue);
 
   if (!newValue) {
     // reload to restore normal behavior
-    mainWindow.webContents.reload()
+    mainWindow.webContents.reload();
   }
 
-  updateMenu()
+  updateMenu();
 }
 
 function focusSearch() {
-  if (!mainWindow) return
-  mainWindow.webContents.executeJavaScript(`
+  if (!mainWindow) return;
+  mainWindow.webContents
+    .executeJavaScript(
+      `
     (function() {
       const search = document.querySelector('input[aria-label="Search Messenger"], input[placeholder*="Search"], input[type="search"]');
       if (!search) return false;
@@ -514,130 +589,140 @@ function focusSearch() {
       if (search.select) search.select();
       return true;
     })()
-  `).catch(() => {})
+  `
+    )
+    .catch(() => {});
 }
 
 function setScheduleDelay(delayMs) {
-  store.set('scheduleDelayMs', delayMs)
-  pushRendererConfig()
-  updateMenu()
+  store.set("scheduleDelayMs", delayMs);
+  pushRendererConfig();
+  updateMenu();
 }
 
 function scheduleSendNow() {
-  if (!mainWindow) return
-  const delay = store.get('scheduleDelayMs')
-  mainWindow.webContents.send('schedule-send', delay)
+  if (!mainWindow) return;
+  const delay = store.get("scheduleDelayMs");
+  mainWindow.webContents.send("schedule-send", delay);
 }
 
 function toggleClipboardSanitize() {
-  const next = !store.get('clipboardSanitize')
-  store.set('clipboardSanitize', next)
-  pushRendererConfig()
-  updateMenu()
+  const next = !store.get("clipboardSanitize");
+  store.set("clipboardSanitize", next);
+  pushRendererConfig();
+  updateMenu();
 }
 
 function toggleKeywordAlerts() {
-  const next = !store.get('keywordAlertsEnabled')
-  store.set('keywordAlertsEnabled', next)
-  pushRendererConfig()
-  updateMenu()
+  const next = !store.get("keywordAlertsEnabled");
+  store.set("keywordAlertsEnabled", next);
+  pushRendererConfig();
+  updateMenu();
 }
 
 // use IPC dialog instead of prompt()
 async function editKeywordAlerts() {
-  if (!mainWindow) return
-  const existing = store.get('keywordAlerts').join(', ')
+  if (!mainWindow) return;
+  const existing = store.get("keywordAlerts").join(", ");
 
   const value = await openInputDialog({
-    title: 'Keyword Alerts',
-    message: 'Enter keywords (comma separated):',
-    defaultValue: existing
-  })
+    title: "Keyword Alerts",
+    message: "Enter keywords (comma separated):",
+    defaultValue: existing,
+  });
 
-  if (typeof value === 'string') {
-    const list = value.split(',').map(k => k.trim()).filter(Boolean)
-    store.set('keywordAlerts', list)
-    pushRendererConfig()
-    updateMenu()
+  if (typeof value === "string") {
+    const list = value
+      .split(",")
+      .map((k) => k.trim())
+      .filter(Boolean);
+    store.set("keywordAlerts", list);
+    pushRendererConfig();
+    updateMenu();
   }
 }
 
 // (legacy channel preserved for renderer modal use)
-ipcMain.on('keyword-input-result', (event, result) => {
-  if (typeof result !== 'string') return
-  const list = result.split(',').map(k => k.trim()).filter(Boolean)
-  store.set('keywordAlerts', list)
-  pushRendererConfig()
-  updateMenu()
-})
+ipcMain.on("keyword-input-result", (event, result) => {
+  if (typeof result !== "string") return;
+  const list = result
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+  store.set("keywordAlerts", list);
+  pushRendererConfig();
+  updateMenu();
+});
 
 function pushRendererConfig() {
-  if (!mainWindow) return
+  if (!mainWindow) return;
   const config = {
-    keywordAlerts: store.get('keywordAlerts'),
-    keywordAlertsEnabled: store.get('keywordAlertsEnabled'),
-    clipboardSanitize: store.get('clipboardSanitize'),
-    scheduleDelayMs: store.get('scheduleDelayMs'),
-    blockTypingIndicator: store.get('blockTypingIndicator')
-  }
+    keywordAlerts: store.get("keywordAlerts"),
+    keywordAlertsEnabled: store.get("keywordAlertsEnabled"),
+    clipboardSanitize: store.get("clipboardSanitize"),
+    scheduleDelayMs: store.get("scheduleDelayMs"),
+    blockTypingIndicator: store.get("blockTypingIndicator"),
+  };
 
-  mainWindow.webContents.send('update-config', config)
+  mainWindow.webContents.send("update-config", config);
 }
 
 function updateUnreadBadge(count) {
-  unreadCount = count
-  if (process.platform === 'darwin' && app.dock) {
-    app.dock.setBadge(count > 0 ? String(count) : '')
+  unreadCount = count;
+  if (process.platform === "darwin" && app.dock) {
+    app.dock.setBadge(count > 0 ? String(count) : "");
   }
   if (tray && tray.setTitle) {
-    tray.setTitle(count > 0 ? ` ${count}` : '')
+    tray.setTitle(count > 0 ? ` ${count}` : "");
   }
 }
 
 function toggleSpellCheck() {
-  const current = store.get('spellCheck')
-  const newValue = !current
-  store.set('spellCheck', newValue)
+  const current = store.get("spellCheck");
+  const newValue = !current;
+  store.set("spellCheck", newValue);
 
   dialog.showMessageBox(mainWindow, {
-    type: 'info',
-    title: 'Restart Required',
-    message: 'Please restart the app for spell check changes to take effect.',
-    buttons: ['OK']
-  })
+    type: "info",
+    title: "Restart Required",
+    message: "Please restart the app for spell check changes to take effect.",
+    buttons: ["OK"],
+  });
 
-  updateMenu()
+  updateMenu();
 }
 
 function toggleBlockTypingIndicator() {
-  const current = store.get('blockTypingIndicator')
-  const newValue = !current
-  store.set('blockTypingIndicator', newValue)
-  updateTypingBlocker(newValue)
+  const current = store.get("blockTypingIndicator");
+  const newValue = !current;
+  store.set("blockTypingIndicator", newValue);
+  updateTypingBlocker(newValue);
 
-  if (!mainWindow) return
+  if (!mainWindow) return;
 
   // notify preload to update typing indicator blocking
-  mainWindow.webContents.send('set-block-typing-indicator', newValue)
+  mainWindow.webContents.send("set-block-typing-indicator", newValue);
 
   if (!newValue) {
-    mainWindow.webContents.reload()
+    mainWindow.webContents.reload();
   }
 
-  updateMenu()
+  updateMenu();
 }
 
 function setWindowOpacity(opacity) {
-  store.set('windowOpacity', opacity)
+  store.set("windowOpacity", opacity);
   if (mainWindow) {
-    mainWindow.setOpacity(opacity)
+    mainWindow.setOpacity(opacity);
   }
-  updateMenu()
+  updateMenu();
 }
 
 function navigateConversation(direction) {
-  if (!mainWindow) return
-  mainWindow.webContents.executeJavaScript(`
+  if (!mainWindow) return;
+  mainWindow.webContents
+    .executeJavaScript(
+      `
     (function() {
       const chatList = document.querySelector('div[aria-label="Chats"]') ||
                        document.querySelector('div[role="navigation"]');
@@ -651,128 +736,150 @@ function navigateConversation(direction) {
       let currentIdx = rows.findIndex(r => r.contains(active) || r === active || r.getAttribute('aria-current') === 'page');
 
       if (currentIdx === -1) {
-        currentIdx = ${direction === 'up' ? 'rows.length' : '-1'};
+        currentIdx = ${direction === "up" ? "rows.length" : "-1"};
       }
 
-      const nextIdx = ${direction === 'up' ? 'Math.max(0, currentIdx - 1)' : 'Math.min(rows.length - 1, currentIdx + 1)'};
+      const nextIdx = ${
+        direction === "up"
+          ? "Math.max(0, currentIdx - 1)"
+          : "Math.min(rows.length - 1, currentIdx + 1)"
+      };
       const target = rows[nextIdx];
       if (target) {
         target.click();
         target.focus();
       }
     })()
-  `).catch(() => {})
+  `
+    )
+    .catch(() => {});
 }
 
 // use IPC dialog instead of prompt() for CSS editing
 async function editCustomCSS() {
-  if (!mainWindow) return
-  const existing = store.get('customCSS')
+  if (!mainWindow) return;
+  const existing = store.get("customCSS");
 
   // show dialog to confirm editing
   const { response } = await dialog.showMessageBox(mainWindow, {
-    type: 'question',
-    title: 'Custom CSS',
-    message: 'Edit custom CSS styling?',
-    detail: existing ? `Current CSS:\n${existing.slice(0, 200)}${existing.length > 200 ? '...' : ''}` : 'No custom CSS set.',
-    buttons: ['Cancel', 'Edit', 'Clear'],
-    defaultId: 1
-  })
+    type: "question",
+    title: "Custom CSS",
+    message: "Edit custom CSS styling?",
+    detail: existing
+      ? `Current CSS:\n${existing.slice(0, 200)}${
+          existing.length > 200 ? "..." : ""
+        }`
+      : "No custom CSS set.",
+    buttons: ["Cancel", "Edit", "Clear"],
+    defaultId: 1,
+  });
 
   if (response === 2) {
     // clear
-    clearCustomCSS()
+    clearCustomCSS();
   } else if (response === 1) {
     const css = await openInputDialog({
-      title: 'Custom CSS',
-      message: 'Enter CSS rules:',
+      title: "Custom CSS",
+      message: "Enter CSS rules:",
       defaultValue: existing,
-      multiline: true
-    })
+      multiline: true,
+    });
 
-    if (typeof css === 'string') {
+    if (typeof css === "string") {
       if (!isSafeCSS(css)) {
-        dialog.showErrorBox('Invalid CSS', 'The CSS contains potentially dangerous content and was rejected.')
-        return
+        dialog.showErrorBox(
+          "Invalid CSS",
+          "The CSS contains potentially dangerous content and was rejected."
+        );
+        return;
       }
-      store.set('customCSS', css)
-      applyCustomCSS()
-      updateMenu()
+      store.set("customCSS", css);
+      applyCustomCSS();
+      updateMenu();
     }
   }
 }
 
 // IPC handler for CSS input result
-ipcMain.on('css-input-result', (event, css) => {
-  if (typeof css !== 'string') return
+ipcMain.on("css-input-result", (event, css) => {
+  if (typeof css !== "string") return;
 
   if (!isSafeCSS(css)) {
-    dialog.showErrorBox('Invalid CSS', 'The CSS contains potentially dangerous content and was rejected.')
-    return
+    dialog.showErrorBox(
+      "Invalid CSS",
+      "The CSS contains potentially dangerous content and was rejected."
+    );
+    return;
   }
 
-  store.set('customCSS', css)
-  applyCustomCSS()
-  updateMenu()
-})
+  store.set("customCSS", css);
+  applyCustomCSS();
+  updateMenu();
+});
 
 function applyCustomCSS() {
-  if (!mainWindow) return
-  const css = store.get('customCSS')
-  mainWindow.webContents.removeInsertedCSS('custom-css').catch(() => {})
+  if (!mainWindow) return;
+  const css = store.get("customCSS");
+  mainWindow.webContents.removeInsertedCSS("custom-css").catch(() => {});
   if (css) {
-    mainWindow.webContents.insertCSS(css, { cssKey: 'custom-css' }).catch(() => {})
+    mainWindow.webContents
+      .insertCSS(css, { cssKey: "custom-css" })
+      .catch(() => {});
   }
 }
 
 function clearCustomCSS() {
-  store.set('customCSS', '')
+  store.set("customCSS", "");
   if (mainWindow) {
-    mainWindow.webContents.removeInsertedCSS('custom-css').catch(() => {})
+    mainWindow.webContents.removeInsertedCSS("custom-css").catch(() => {});
   }
-  updateMenu()
+  updateMenu();
 }
 
 async function exportCookies() {
   const { filePath } = await dialog.showSaveDialog(mainWindow, {
-    title: 'Export Session',
-    defaultPath: 'messenger-session.json',
-    filters: [{ name: 'JSON', extensions: ['json'] }]
-  })
+    title: "Export Session",
+    defaultPath: "messenger-session.json",
+    filters: [{ name: "JSON", extensions: ["json"] }],
+  });
 
-  if (!filePath) return
+  if (!filePath) return;
 
   try {
-    const cookies = await session.defaultSession.cookies.get({ url: 'https://www.messenger.com' })
-    const facebookCookies = await session.defaultSession.cookies.get({ url: 'https://www.facebook.com' })
-    const allCookies = [...cookies, ...facebookCookies]
+    const cookies = await session.defaultSession.cookies.get({
+      url: "https://www.messenger.com",
+    });
+    const facebookCookies = await session.defaultSession.cookies.get({
+      url: "https://www.facebook.com",
+    });
+    const allCookies = [...cookies, ...facebookCookies];
 
-    fs.writeFileSync(filePath, JSON.stringify(allCookies, null, 2))
+    fs.writeFileSync(filePath, JSON.stringify(allCookies, null, 2));
     dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: 'Export Complete',
-      message: `Exported ${allCookies.length} cookies`
-    })
+      type: "info",
+      title: "Export Complete",
+      message: `Exported ${allCookies.length} cookies`,
+    });
   } catch (err) {
-    dialog.showErrorBox('Export Failed', err.message)
+    dialog.showErrorBox("Export Failed", err.message);
   }
 }
 
 async function importCookies() {
   const { filePaths } = await dialog.showOpenDialog(mainWindow, {
-    title: 'Import Session',
-    filters: [{ name: 'JSON', extensions: ['json'] }],
-    properties: ['openFile']
-  })
+    title: "Import Session",
+    filters: [{ name: "JSON", extensions: ["json"] }],
+    properties: ["openFile"],
+  });
 
-  if (!filePaths || filePaths.length === 0) return
+  if (!filePaths || filePaths.length === 0) return;
 
   try {
-    const data = fs.readFileSync(filePaths[0], 'utf8')
-    const cookies = JSON.parse(data)
+    const data = fs.readFileSync(filePaths[0], "utf8");
+    const cookies = JSON.parse(data);
 
     for (const cookie of cookies) {
-      const url = `https://${cookie.domain.replace(/^\./, '')}${cookie.path}`
+      const url = `https://${cookie.domain.replace(/^\./, "")}${cookie.path}`;
       await session.defaultSession.cookies.set({
         url,
         name: cookie.name,
@@ -781,40 +888,40 @@ async function importCookies() {
         path: cookie.path,
         secure: cookie.secure,
         httpOnly: cookie.httpOnly,
-        expirationDate: cookie.expirationDate
-      })
+        expirationDate: cookie.expirationDate,
+      });
     }
 
     dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: 'Import Complete',
-      message: `Imported ${cookies.length} cookies. Reloading...`
-    })
+      type: "info",
+      title: "Import Complete",
+      message: `Imported ${cookies.length} cookies. Reloading...`,
+    });
 
-    mainWindow.webContents.reload()
+    mainWindow.webContents.reload();
   } catch (err) {
-    dialog.showErrorBox('Import Failed', err.message)
+    dialog.showErrorBox("Import Failed", err.message);
   }
 }
 
 async function clearSession() {
   const { response } = await dialog.showMessageBox(mainWindow, {
-    type: 'warning',
-    title: 'Clear Session',
-    message: 'This will log you out. Continue?',
-    buttons: ['Cancel', 'Clear']
-  })
+    type: "warning",
+    title: "Clear Session",
+    message: "This will log you out. Continue?",
+    buttons: ["Cancel", "Clear"],
+  });
 
   if (response === 1) {
-    await session.defaultSession.clearStorageData()
-    mainWindow.webContents.reload()
+    await session.defaultSession.clearStorageData();
+    mainWindow.webContents.reload();
   }
 }
 
 function createPipWindow() {
   if (pipWindow) {
-    pipWindow.focus()
-    return
+    pipWindow.focus();
+    return;
   }
 
   pipWindow = new BrowserWindow({
@@ -828,21 +935,21 @@ function createPipWindow() {
     resizable: true,
     webPreferences: {
       contextIsolation: true,
-      nodeIntegration: false
-    }
-  })
+      nodeIntegration: false,
+    },
+  });
 
-  pipWindow.loadURL('https://www.messenger.com')
-  pipWindow.webContents.setUserAgent(USER_AGENT)
+  pipWindow.loadURL("https://www.messenger.com");
+  pipWindow.webContents.setUserAgent(USER_AGENT);
 
-  pipWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.key === 'Escape') {
-      pipWindow.close()
+  pipWindow.webContents.on("before-input-event", (event, input) => {
+    if (input.key === "Escape") {
+      pipWindow.close();
     }
-  })
+  });
 
   // inject close button using insertCSS + simple JS (no script tag)
-  pipWindow.webContents.on('did-finish-load', () => {
+  pipWindow.webContents.on("did-finish-load", () => {
     pipWindow.webContents.insertCSS(`
       .pip-close-btn {
         position: fixed; top: 8px; right: 8px;
@@ -857,7 +964,7 @@ function createPipWindow() {
         border: none;
       }
       .pip-close-btn:hover { background: rgba(255,0,0,0.8); }
-    `)
+    `);
     pipWindow.webContents.executeJavaScript(`
       (function() {
         const btn = document.createElement('button');
@@ -866,319 +973,569 @@ function createPipWindow() {
         btn.onclick = () => window.close();
         document.body.appendChild(btn);
       })()
-    `)
-  })
+    `);
+  });
 
-  pipWindow.on('closed', () => {
-    pipWindow = null
-  })
+  pipWindow.on("closed", () => {
+    pipWindow = null;
+  });
 }
 
 function updateMenu() {
-  const alwaysOnTop = store.get('alwaysOnTop')
-  const theme = store.get('theme')
-  const dnd = store.get('doNotDisturb')
-  const launchAtLogin = store.get('launchAtLogin')
-  const focusMode = store.get('focusMode')
-  const quickReplies = store.get('quickReplies')
-  const menuBarMode = store.get('menuBarMode')
-  const blockReadReceipts = store.get('blockReadReceipts')
-  const spellCheck = store.get('spellCheck')
-  const scheduleDelayMs = store.get('scheduleDelayMs')
-  const clipboardSanitize = store.get('clipboardSanitize')
-  const keywordAlertsEnabled = store.get('keywordAlertsEnabled')
-  const blockTypingIndicator = store.get('blockTypingIndicator')
-  const windowOpacity = store.get('windowOpacity')
-  const customCSS = store.get('customCSS')
+  const alwaysOnTop = store.get("alwaysOnTop");
+  const theme = store.get("theme");
+  const dnd = store.get("doNotDisturb");
+  const launchAtLogin = store.get("launchAtLogin");
+  const focusMode = store.get("focusMode");
+  const quickReplies = store.get("quickReplies");
+  const menuBarMode = store.get("menuBarMode");
+  const blockReadReceipts = store.get("blockReadReceipts");
+  const spellCheck = store.get("spellCheck");
+  const scheduleDelayMs = store.get("scheduleDelayMs");
+  const clipboardSanitize = store.get("clipboardSanitize");
+  const keywordAlertsEnabled = store.get("keywordAlertsEnabled");
+  const blockTypingIndicator = store.get("blockTypingIndicator");
+  const windowOpacity = store.get("windowOpacity");
+  const customCSS = store.get("customCSS");
 
   const template = [
     {
       label: app.name,
       submenu: [
-        { role: 'about' },
-        { type: 'separator' },
-        { role: 'hide' },
-        { role: 'hideOthers' },
-        { role: 'unhide' },
-        { type: 'separator' },
-        { role: 'quit' }
-      ]
+        { role: "about" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
     },
     {
-      label: 'Edit',
+      label: "Edit",
       submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'selectAll' }
-      ]
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
     },
     {
-      label: 'View',
+      label: "View",
       submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
-        { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
-        { role: 'toggleDevTools' }
-      ]
+        { role: "reload" },
+        { role: "forceReload" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+        { role: "toggleDevTools" },
+      ],
     },
     {
-      label: 'Unleashed',
+      label: "Unleashed",
       submenu: [
         {
-          label: 'Always on Top',
-          type: 'checkbox',
+          label: "Always on Top",
+          type: "checkbox",
           checked: alwaysOnTop,
-          accelerator: 'CmdOrCtrl+Shift+T',
-          click: toggleAlwaysOnTop
+          accelerator: "CmdOrCtrl+Shift+T",
+          click: toggleAlwaysOnTop,
         },
-        { type: 'separator' },
+        { type: "separator" },
         {
-          label: 'Theme',
+          label: "Theme",
           submenu: [
-            { label: 'Default', type: 'radio', checked: theme === 'default', click: () => applyTheme('default') },
-            { type: 'separator' },
-            { label: 'OLED Dark', type: 'radio', checked: theme === 'oled', click: () => applyTheme('oled') },
-            { label: 'Nord', type: 'radio', checked: theme === 'nord', click: () => applyTheme('nord') },
-            { label: 'Dracula', type: 'radio', checked: theme === 'dracula', click: () => applyTheme('dracula') },
-            { label: 'Solarized Dark', type: 'radio', checked: theme === 'solarized', click: () => applyTheme('solarized') },
-            { label: 'High Contrast', type: 'radio', checked: theme === 'highcontrast', click: () => applyTheme('highcontrast') },
-            { type: 'separator' },
-            { label: 'Compact', type: 'radio', checked: theme === 'compact', click: () => applyTheme('compact') }
-          ]
+            {
+              label: "Default",
+              type: "radio",
+              checked: theme === "default",
+              click: () => applyTheme("default"),
+            },
+            { type: "separator" },
+            {
+              label: "OLED Dark",
+              type: "radio",
+              checked: theme === "oled",
+              click: () => applyTheme("oled"),
+            },
+            {
+              label: "Nord",
+              type: "radio",
+              checked: theme === "nord",
+              click: () => applyTheme("nord"),
+            },
+            {
+              label: "Dracula",
+              type: "radio",
+              checked: theme === "dracula",
+              click: () => applyTheme("dracula"),
+            },
+            {
+              label: "Solarized Dark",
+              type: "radio",
+              checked: theme === "solarized",
+              click: () => applyTheme("solarized"),
+            },
+            {
+              label: "High Contrast",
+              type: "radio",
+              checked: theme === "highcontrast",
+              click: () => applyTheme("highcontrast"),
+            },
+            { type: "separator" },
+            {
+              label: "Crimson",
+              type: "radio",
+              checked: theme === "crimson",
+              click: () => applyTheme("crimson"),
+            },
+            {
+              label: "Electric Crimson",
+              type: "radio",
+              checked: theme === "electriccrimson",
+              click: () => applyTheme("electriccrimson"),
+            },
+            {
+              label: "Neon Coral",
+              type: "radio",
+              checked: theme === "neoncoral",
+              click: () => applyTheme("neoncoral"),
+            },
+            {
+              label: "Inferno Orange",
+              type: "radio",
+              checked: theme === "infernoorange",
+              click: () => applyTheme("infernoorange"),
+            },
+            {
+              label: "Solar Gold",
+              type: "radio",
+              checked: theme === "solargold",
+              click: () => applyTheme("solargold"),
+            },
+            {
+              label: "Acid Lime",
+              type: "radio",
+              checked: theme === "acidlime",
+              click: () => applyTheme("acidlime"),
+            },
+            {
+              label: "Emerald Flash",
+              type: "radio",
+              checked: theme === "emeraldflash",
+              click: () => applyTheme("emeraldflash"),
+            },
+            {
+              label: "Cyber Teal",
+              type: "radio",
+              checked: theme === "cyberteal",
+              click: () => applyTheme("cyberteal"),
+            },
+            {
+              label: "Electric Blue",
+              type: "radio",
+              checked: theme === "electricblue",
+              click: () => applyTheme("electricblue"),
+            },
+            {
+              label: "Ultraviolet",
+              type: "radio",
+              checked: theme === "ultraviolet",
+              click: () => applyTheme("ultraviolet"),
+            },
+            {
+              label: "Hot Magenta",
+              type: "radio",
+              checked: theme === "hotmagenta",
+              click: () => applyTheme("hotmagenta"),
+            },
+            { type: "separator" },
+            {
+              label: "Compact",
+              type: "radio",
+              checked: theme === "compact",
+              click: () => applyTheme("compact"),
+            },
+          ],
         },
-        { type: 'separator' },
-        { label: 'Focus Mode', type: 'checkbox', checked: focusMode, accelerator: 'CmdOrCtrl+Shift+F', click: toggleFocusMode },
-        { label: 'Do Not Disturb', type: 'checkbox', checked: dnd, accelerator: 'CmdOrCtrl+Shift+D', click: toggleDoNotDisturb },
-        { type: 'separator' },
+        { type: "separator" },
         {
-          label: 'Quick Replies',
-          submenu: quickReplies.map(qr => ({
+          label: "Focus Mode",
+          type: "checkbox",
+          checked: focusMode,
+          accelerator: "CmdOrCtrl+Shift+F",
+          click: toggleFocusMode,
+        },
+        {
+          label: "Do Not Disturb",
+          type: "checkbox",
+          checked: dnd,
+          accelerator: "CmdOrCtrl+Shift+D",
+          click: toggleDoNotDisturb,
+        },
+        { type: "separator" },
+        {
+          label: "Quick Replies",
+          submenu: quickReplies.map((qr) => ({
             label: `Send: ${qr.text}`,
             accelerator: `CmdOrCtrl+Shift+${qr.key}`,
-            click: () => sendQuickReply(qr.text)
-          }))
+            click: () => sendQuickReply(qr.text),
+          })),
         },
-        { type: 'separator' },
-        { label: 'Focus Search', accelerator: 'CmdOrCtrl+K', click: focusSearch },
-        { label: `Send in ${Math.round(scheduleDelayMs / 1000)}s`, accelerator: 'CmdOrCtrl+Alt+Enter', click: scheduleSendNow },
+        { type: "separator" },
         {
-          label: 'Schedule Delay',
-          submenu: [
-            { label: '5s', type: 'radio', checked: scheduleDelayMs === 5000, click: () => setScheduleDelay(5000) },
-            { label: '30s', type: 'radio', checked: scheduleDelayMs === 30000, click: () => setScheduleDelay(30000) },
-            { label: '2 min', type: 'radio', checked: scheduleDelayMs === 120000, click: () => setScheduleDelay(120000) }
-          ]
-        },
-        { type: 'separator' },
-        { label: 'Clipboard Sanitizer', type: 'checkbox', checked: clipboardSanitize, click: toggleClipboardSanitize },
-        { label: 'Keyword Alerts', type: 'checkbox', checked: keywordAlertsEnabled, click: toggleKeywordAlerts },
-        { label: 'Edit Keyword Alerts...', click: editKeywordAlerts },
-        { type: 'separator' },
-        { label: 'Picture in Picture', accelerator: 'CmdOrCtrl+Shift+P', click: createPipWindow },
-        { type: 'separator' },
-        { label: 'Menu Bar Mode', type: 'checkbox', checked: menuBarMode, click: toggleMenuBarMode },
-        { label: 'Launch at Login', type: 'checkbox', checked: launchAtLogin, click: toggleLaunchAtLogin },
-        { type: 'separator' },
-        { label: 'Block Read Receipts', type: 'checkbox', checked: blockReadReceipts, click: toggleBlockReadReceipts },
-        { label: 'Block Typing Indicator', type: 'checkbox', checked: blockTypingIndicator, click: toggleBlockTypingIndicator },
-        { label: 'Spell Check', type: 'checkbox', checked: spellCheck, click: toggleSpellCheck },
-        { type: 'separator' },
-        {
-          label: 'Window Opacity',
-          submenu: [
-            { label: '100%', type: 'radio', checked: windowOpacity === 1.0, click: () => setWindowOpacity(1.0) },
-            { label: '90%', type: 'radio', checked: windowOpacity === 0.9, click: () => setWindowOpacity(0.9) },
-            { label: '80%', type: 'radio', checked: windowOpacity === 0.8, click: () => setWindowOpacity(0.8) },
-            { label: '70%', type: 'radio', checked: windowOpacity === 0.7, click: () => setWindowOpacity(0.7) },
-            { label: '60%', type: 'radio', checked: windowOpacity === 0.6, click: () => setWindowOpacity(0.6) }
-          ]
+          label: "Focus Search",
+          accelerator: "CmdOrCtrl+K",
+          click: focusSearch,
         },
         {
-          label: 'Custom CSS',
-          submenu: [
-            { label: customCSS ? 'Edit Custom CSS...' : 'Add Custom CSS...', click: editCustomCSS },
-            { label: 'Clear Custom CSS', enabled: !!customCSS, click: clearCustomCSS }
-          ]
+          label: `Send in ${Math.round(scheduleDelayMs / 1000)}s`,
+          accelerator: "CmdOrCtrl+Alt+Enter",
+          click: scheduleSendNow,
         },
-        { type: 'separator' },
-        { label: 'Previous Chat', accelerator: 'CmdOrCtrl+Up', click: () => navigateConversation('up') },
-        { label: 'Next Chat', accelerator: 'CmdOrCtrl+Down', click: () => navigateConversation('down') },
-        { type: 'separator' },
         {
-          label: 'Session',
+          label: "Schedule Delay",
           submenu: [
-            { label: 'Export Session...', click: exportCookies },
-            { label: 'Import Session...', click: importCookies },
-            { type: 'separator' },
-            { label: 'Clear Session (Logout)', click: clearSession }
-          ]
-        }
-      ]
+            {
+              label: "5s",
+              type: "radio",
+              checked: scheduleDelayMs === 5000,
+              click: () => setScheduleDelay(5000),
+            },
+            {
+              label: "30s",
+              type: "radio",
+              checked: scheduleDelayMs === 30000,
+              click: () => setScheduleDelay(30000),
+            },
+            {
+              label: "2 min",
+              type: "radio",
+              checked: scheduleDelayMs === 120000,
+              click: () => setScheduleDelay(120000),
+            },
+          ],
+        },
+        { type: "separator" },
+        {
+          label: "Clipboard Sanitizer",
+          type: "checkbox",
+          checked: clipboardSanitize,
+          click: toggleClipboardSanitize,
+        },
+        {
+          label: "Keyword Alerts",
+          type: "checkbox",
+          checked: keywordAlertsEnabled,
+          click: toggleKeywordAlerts,
+        },
+        { label: "Edit Keyword Alerts...", click: editKeywordAlerts },
+        { type: "separator" },
+        {
+          label: "Picture in Picture",
+          accelerator: "CmdOrCtrl+Shift+P",
+          click: createPipWindow,
+        },
+        { type: "separator" },
+        {
+          label: "Menu Bar Mode",
+          type: "checkbox",
+          checked: menuBarMode,
+          click: toggleMenuBarMode,
+        },
+        {
+          label: "Launch at Login",
+          type: "checkbox",
+          checked: launchAtLogin,
+          click: toggleLaunchAtLogin,
+        },
+        { type: "separator" },
+        {
+          label: "Block Read Receipts",
+          type: "checkbox",
+          checked: blockReadReceipts,
+          click: toggleBlockReadReceipts,
+        },
+        {
+          label: "Block Typing Indicator",
+          type: "checkbox",
+          checked: blockTypingIndicator,
+          click: toggleBlockTypingIndicator,
+        },
+        {
+          label: "Spell Check",
+          type: "checkbox",
+          checked: spellCheck,
+          click: toggleSpellCheck,
+        },
+        { type: "separator" },
+        {
+          label: "Window Opacity",
+          submenu: [
+            {
+              label: "100%",
+              type: "radio",
+              checked: windowOpacity === 1.0,
+              click: () => setWindowOpacity(1.0),
+            },
+            {
+              label: "90%",
+              type: "radio",
+              checked: windowOpacity === 0.9,
+              click: () => setWindowOpacity(0.9),
+            },
+            {
+              label: "80%",
+              type: "radio",
+              checked: windowOpacity === 0.8,
+              click: () => setWindowOpacity(0.8),
+            },
+            {
+              label: "70%",
+              type: "radio",
+              checked: windowOpacity === 0.7,
+              click: () => setWindowOpacity(0.7),
+            },
+            {
+              label: "60%",
+              type: "radio",
+              checked: windowOpacity === 0.6,
+              click: () => setWindowOpacity(0.6),
+            },
+          ],
+        },
+        {
+          label: "Custom CSS",
+          submenu: [
+            {
+              label: customCSS ? "Edit Custom CSS..." : "Add Custom CSS...",
+              click: editCustomCSS,
+            },
+            {
+              label: "Clear Custom CSS",
+              enabled: !!customCSS,
+              click: clearCustomCSS,
+            },
+          ],
+        },
+        { type: "separator" },
+        {
+          label: "Previous Chat",
+          accelerator: "CmdOrCtrl+Up",
+          click: () => navigateConversation("up"),
+        },
+        {
+          label: "Next Chat",
+          accelerator: "CmdOrCtrl+Down",
+          click: () => navigateConversation("down"),
+        },
+        { type: "separator" },
+        {
+          label: "Session",
+          submenu: [
+            { label: "Export Session...", click: exportCookies },
+            { label: "Import Session...", click: importCookies },
+            { type: "separator" },
+            { label: "Clear Session (Logout)", click: clearSession },
+          ],
+        },
+        { type: "separator" },
+        {
+          label: "Theme Creator...",
+          click: () => shell.openExternal("https://mstheme.pcstyle.dev"),
+        },
+      ],
     },
     {
-      label: 'Window',
+      label: "Window",
       submenu: [
-        { role: 'minimize' },
-        { role: 'zoom' },
-        { type: 'separator' },
-        { role: 'front' }
-      ]
-    }
-  ]
+        { role: "minimize" },
+        { role: "zoom" },
+        { type: "separator" },
+        { role: "front" },
+      ],
+    },
+  ];
 
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 function createWindow() {
-  const bounds = store.get('windowBounds')
+  const bounds = store.get("windowBounds");
 
   mainWindow = new BrowserWindow({
     width: bounds.width,
     height: bounds.height,
     minWidth: 400,
     minHeight: 300,
-    title: 'Messenger Unleashed',
-    alwaysOnTop: store.get('alwaysOnTop'),
+    title: "Messenger Unleashed",
+    alwaysOnTop: store.get("alwaysOnTop"),
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      spellcheck: store.get('spellCheck')
-    }
-  })
+      spellcheck: store.get("spellCheck"),
+    },
+  });
 
-  mainWindow.webContents.setUserAgent(USER_AGENT)
-  mainWindow.webContents.setMaxListeners(20)
+  mainWindow.webContents.setUserAgent(USER_AGENT);
+  mainWindow.webContents.setMaxListeners(20);
 
-  const opacity = store.get('windowOpacity')
+  const opacity = store.get("windowOpacity");
   if (opacity < 1.0) {
-    mainWindow.setOpacity(opacity)
+    mainWindow.setOpacity(opacity);
   }
 
-  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    const allowedPermissions = ['media', 'mediaKeySystem', 'geolocation', 'notifications', 'fullscreen', 'pointerLock']
-    callback(allowedPermissions.includes(permission))
-  })
+  session.defaultSession.setPermissionRequestHandler(
+    (webContents, permission, callback) => {
+      const allowedPermissions = [
+        "media",
+        "mediaKeySystem",
+        "geolocation",
+        "notifications",
+        "fullscreen",
+        "pointerLock",
+      ];
+      callback(allowedPermissions.includes(permission));
+    }
+  );
 
-  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
-    const allowedPermissions = ['media', 'mediaKeySystem', 'geolocation', 'notifications', 'fullscreen', 'pointerLock']
-    return allowedPermissions.includes(permission)
-  })
+  session.defaultSession.setPermissionCheckHandler(
+    (webContents, permission) => {
+      const allowedPermissions = [
+        "media",
+        "mediaKeySystem",
+        "geolocation",
+        "notifications",
+        "fullscreen",
+        "pointerLock",
+      ];
+      return allowedPermissions.includes(permission);
+    }
+  );
 
   // apply typing blocker before loading content if enabled
-  updateTypingBlocker(store.get('blockTypingIndicator'))
+  updateTypingBlocker(store.get("blockTypingIndicator"));
 
-  mainWindow.loadURL('https://www.messenger.com')
+  mainWindow.loadURL("https://www.messenger.com");
 
-  mainWindow.on('page-title-updated', (event, title) => {
-    const match = title.match(/\((\d+)\)/)
-    const count = match ? parseInt(match[1], 10) : 0
-    updateUnreadBadge(Number.isFinite(count) ? count : 0)
-  })
+  mainWindow.on("page-title-updated", (event, title) => {
+    const match = title.match(/\((\d+)\)/);
+    const count = match ? parseInt(match[1], 10) : 0;
+    updateUnreadBadge(Number.isFinite(count) ? count : 0);
+  });
 
-  mainWindow.webContents.on('did-finish-load', () => {
-    const theme = store.get('theme')
-    if (theme !== 'default') {
-      applyThemeCSS(theme)
+  mainWindow.webContents.on("did-finish-load", () => {
+    const theme = store.get("theme");
+    if (theme !== "default") {
+      applyThemeCSS(theme);
     }
 
-    if (store.get('focusMode')) {
-      mainWindow.webContents.insertCSS(`
+    if (store.get("focusMode")) {
+      mainWindow.webContents.insertCSS(
+        `
         div[aria-label="Chats"],
         div[role="navigation"] { display: none !important; }
         div[role="main"] { width: 100% !important; max-width: 100% !important; }
-      `, { cssKey: 'focus-mode' })
+      `,
+        { cssKey: "focus-mode" }
+      );
     }
 
-    applyCustomCSS()
-    pushRendererConfig()
+    applyCustomCSS();
+    pushRendererConfig();
 
     // send initial feature states to preload
-    mainWindow.webContents.send('set-block-read-receipts', store.get('blockReadReceipts'))
-    mainWindow.webContents.send('set-block-typing-indicator', store.get('blockTypingIndicator'))
-  })
+    mainWindow.webContents.send(
+      "set-block-read-receipts",
+      store.get("blockReadReceipts")
+    );
+    mainWindow.webContents.send(
+      "set-block-typing-indicator",
+      store.get("blockTypingIndicator")
+    );
+  });
 
-  mainWindow.on('resize', () => {
-    const { width, height } = mainWindow.getBounds()
-    store.set('windowBounds', { width, height })
-  })
+  mainWindow.on("resize", () => {
+    const { width, height } = mainWindow.getBounds();
+    store.set("windowBounds", { width, height });
+  });
 
-  mainWindow.on('closed', () => {
-    mainWindow = null
-  })
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
 
-  if (store.get('menuBarMode')) {
-    const success = createTray()
+  if (store.get("menuBarMode")) {
+    const success = createTray();
     if (success) {
-      mainWindow.setSkipTaskbar(true)
+      mainWindow.setSkipTaskbar(true);
     } else {
-      store.set('menuBarMode', false)
+      store.set("menuBarMode", false);
     }
   }
 
-  updateMenu()
+  updateMenu();
 }
 
-app.on('ready', () => {
-  const { globalShortcut } = require('electron')
+app.on("ready", () => {
+  const { globalShortcut } = require("electron");
 
-  globalShortcut.register('CmdOrCtrl+Shift+T', toggleAlwaysOnTop)
-  globalShortcut.register('CmdOrCtrl+Shift+D', toggleDoNotDisturb)
-  globalShortcut.register('CmdOrCtrl+Shift+F', toggleFocusMode)
-  globalShortcut.register('CmdOrCtrl+Shift+P', createPipWindow)
-  globalShortcut.register('CmdOrCtrl+K', focusSearch)
-  globalShortcut.register('CmdOrCtrl+Alt+Enter', scheduleSendNow)
+  globalShortcut.register("CmdOrCtrl+Shift+T", toggleAlwaysOnTop);
+  globalShortcut.register("CmdOrCtrl+Shift+D", toggleDoNotDisturb);
+  globalShortcut.register("CmdOrCtrl+Shift+F", toggleFocusMode);
+  globalShortcut.register("CmdOrCtrl+Shift+P", createPipWindow);
+  globalShortcut.register("CmdOrCtrl+K", focusSearch);
+  globalShortcut.register("CmdOrCtrl+Alt+Enter", scheduleSendNow);
 
-  globalShortcut.register('CmdOrCtrl+Up', () => navigateConversation('up'))
-  globalShortcut.register('CmdOrCtrl+Down', () => navigateConversation('down'))
+  globalShortcut.register("CmdOrCtrl+Up", () => navigateConversation("up"));
+  globalShortcut.register("CmdOrCtrl+Down", () => navigateConversation("down"));
 
-  const quickReplies = store.get('quickReplies')
-  quickReplies.forEach(qr => {
-    globalShortcut.register(`CmdOrCtrl+Shift+${qr.key}`, () => sendQuickReply(qr.text))
-  })
-})
+  const quickReplies = store.get("quickReplies");
+  quickReplies.forEach((qr) => {
+    globalShortcut.register(`CmdOrCtrl+Shift+${qr.key}`, () =>
+      sendQuickReply(qr.text)
+    );
+  });
+});
 
 app.whenReady().then(() => {
-  const launchAtLogin = store.get('launchAtLogin')
+  const launchAtLogin = store.get("launchAtLogin");
   const canSetLogin =
-    process.platform !== 'darwin' ||
-    (app.isInApplicationsFolder && app.isInApplicationsFolder())
+    process.platform !== "darwin" ||
+    (app.isInApplicationsFolder && app.isInApplicationsFolder());
   if (canSetLogin) {
     try {
       app.setLoginItemSettings({
         openAtLogin: launchAtLogin,
-        openAsHidden: false
-      })
+        openAsHidden: false,
+      });
     } catch (err) {
-      console.warn('Failed to set login item', err)
+      console.warn("Failed to set login item", err);
     }
   }
 
-  createWindow()
+  createWindow();
 
-  app.on('activate', () => {
+  app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
+      createWindow();
     }
-  })
-})
+  });
+});
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
   }
-})
+});
 
-app.on('will-quit', () => {
-  const { globalShortcut } = require('electron')
-  globalShortcut.unregisterAll()
-})
+app.on("will-quit", () => {
+  const { globalShortcut } = require("electron");
+  globalShortcut.unregisterAll();
+});
