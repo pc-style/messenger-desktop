@@ -804,7 +804,7 @@ async function editCustomCSS() {
 async function checkForUpdates() {
   const CURRENT_VERSION = app.getVersion();
   const VERSION_URL =
-    "https://raw.githubusercontent.com/pcstyle/messenger-desktop/main/.version";
+    "https://raw.githubusercontent.com/pc-style/messenger-desktop/main/.version";
 
   try {
     const request = net.request(VERSION_URL);
