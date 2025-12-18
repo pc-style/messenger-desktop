@@ -38,6 +38,7 @@ const store = new Store({
     windowOpacity: 1.0,
     customCSS: "",
     modernLook: false,
+    floatingGlass: false,
   },
 });
 
@@ -806,16 +807,32 @@ function navigateConversation(direction) {
     .executeJavaScript(
       `
     (function() {
+      // Prioritize the actual chat list. Messenger usually labels it "Chats" or "Conversations".
+      // We explicitly avoid selecting the main navigation sidebar (which often has role="navigation").
       const chatList = document.querySelector('div[aria-label="Chats"]') ||
-                       document.querySelector('div[role="navigation"]');
+                       document.querySelector('div[aria-label="Conversations"]') ||
+                       document.querySelector('div[role="grid"][aria-label]') ||
+                       document.querySelector('div[role="main"] div[role="grid"]') ||
+                       document.querySelector('div[role="navigation"] + div div[role="grid"]'); // Often the layout is [Nav] [ChatList] [Main]
+      
       if (!chatList) return;
 
-      const rows = Array.from(chatList.querySelectorAll('a[href*="/t/"], div[role="gridcell"][aria-label], div[role="row"] a'));
+      // Only select links that are actually threads (/t/) or identified as chat rows.
+      // We want to avoid catching the sidebar tabs (which are often also role="gridcell").
+      const rows = Array.from(chatList.querySelectorAll('a[href*="/t/"], div[role="row"] a, div[role="gridcell"] a[href*="/t/"]'));
       if (!rows.length) return;
 
       const active = document.querySelector('a[aria-current="page"]') ||
+                     document.querySelector('a[aria-selected="true"]') ||
+                     document.querySelector('[role="row"][aria-selected="true"]') ||
+                     document.querySelector('[role="gridcell"][aria-selected="true"]') ||
                      document.activeElement;
-      let currentIdx = rows.findIndex(r => r.contains(active) || r === active || r.getAttribute('aria-current') === 'page');
+      let currentIdx = rows.findIndex(r => 
+        r.contains(active) || 
+        r === active || 
+        r.getAttribute('aria-current') === 'page' ||
+        r.getAttribute('aria-selected') === 'true'
+      );
 
       if (currentIdx === -1) {
         currentIdx = ${direction === "up" ? "rows.length" : "-1"};
@@ -884,7 +901,7 @@ async function editCustomCSS() {
 async function checkForUpdates() {
   const CURRENT_VERSION = app.getVersion();
   const VERSION_URL =
-    "https://raw.githubusercontent.com/pc-style/messenger-desktop/main/.version";
+    "https://raw.githubusercontent.com/pcstyleorg/messenger-desktop/main/.version";
 
   try {
     const request = net.request(VERSION_URL);
@@ -915,7 +932,7 @@ async function checkForUpdates() {
             .then(({ response }) => {
               if (response === 0) {
                 shell.openExternal(
-                  "https://github.com/pc-style/messenger-desktop/releases"
+                  "https://github.com/pcstyleorg/messenger-desktop/releases"
                 );
               }
             });
@@ -1150,10 +1167,198 @@ function applyModernLook() {
 
 function toggleModernLook() {
   const current = store.get("modernLook");
-  store.set("modernLook", !current);
+  const newValue = !current;
+  
+  if (newValue) {
+    store.set("floatingGlass", false);
+  }
+  store.set("modernLook", newValue);
+
   applyModernLook();
+  applyFloatingGlass();
   updateMenu();
 }
+
+function toggleFloatingGlass() {
+  const current = store.get("floatingGlass");
+  const newValue = !current;
+  
+  if (newValue) {
+    store.set("modernLook", false);
+  }
+  store.set("floatingGlass", newValue);
+
+  applyModernLook();
+  applyFloatingGlass();
+  updateMenu();
+}
+
+function applyFloatingGlass() {
+  if (!mainWindow) return;
+  const enabled = store.get("floatingGlass");
+  mainWindow.webContents.removeInsertedCSS("floating-glass").catch(() => {});
+
+  if (enabled) {
+    // Proposal 1: Glassmorphism premium UI
+    const glassCSS = `
+      :root {
+        --glass-bg: rgba(24, 24, 27, 0.65) !important;
+        --glass-blur: 25px !important;
+        --glass-border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        --glass-radius: 24px !important;
+        --accent-primary: #6366f1 !important;
+        --accent-secondary: #06b6d4 !important;
+      }
+
+      /* Base Canvas */
+      html, body, div[role="main"] {
+        background: transparent !important;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #020617 100%) !important;
+        z-index: -1;
+      }
+
+      /* Floating Glass Panels */
+      div[role="navigation"], 
+      div[aria-label="Chats"], 
+      div[role="main"] > div:first-child,
+      aside[role="complementary"] {
+        background: var(--glass-bg) !important;
+        backdrop-filter: blur(var(--glass-blur)) saturate(180%) !important;
+        border: var(--glass-border) !important;
+        border-radius: var(--glass-radius) !important;
+        margin: 12px !important;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3) !important;
+        overflow: hidden !important;
+      }
+
+      /* Message bubble styling */
+      div[data-testid="message-container"] div[dir="auto"] {
+        border-radius: 18px !important;
+      }
+
+      /* Sent bubbles */
+      div[data-testid="outgoing_message"] div[dir="auto"] {
+        background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary)) !important;
+        color: white !important;
+      }
+
+      /* Received bubbles */
+      div[data-testid="incoming_message"] div[dir="auto"] {
+        background: rgba(255, 255, 255, 0.1) !important;
+        backdrop-filter: blur(5px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.05) !important;
+      }
+
+      /* Navigation highlight */
+      div[role="navigation"] a[aria-current="page"],
+      div[aria-label="Chats"] div[aria-selected="true"] {
+        background: rgba(255, 255, 255, 0.1) !important;
+        border-radius: 12px !important;
+      }
+
+      /* Search bar */
+      input[aria-label="Search Messenger"] {
+        background: rgba(255, 255, 255, 0.05) !important;
+        border-radius: 12px !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+      }
+
+      /* Animations */
+      @keyframes glassFadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      div[role="navigation"], div[aria-label="Chats"], div[role="main"] {
+        animation: glassFadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+    `;
+    mainWindow.webContents
+      .insertCSS(glassCSS, { cssKey: "floating-glass" })
+      .catch(() => {});
+      
+    // Force default theme to avoid clashing
+    applyThemeCSS("default");
+  } else {
+    // Restore normal theme settings
+    const currentTheme = store.get("theme");
+    applyThemeCSS(currentTheme);
+  }
+}
+
+// Function to open the Settings UI
+function openSettingsUI() {
+  if (!mainWindow) return;
+  
+  // Send the full config so the Settings UI knows what's enabled
+  const fullConfig = {
+    blockReadReceipts: store.get("blockReadReceipts"),
+    blockTypingIndicator: store.get("blockTypingIndicator"),
+    clipboardSanitize: store.get("clipboardSanitize"),
+    keywordAlertsEnabled: store.get("keywordAlertsEnabled"),
+    modernLook: store.get("modernLook"),
+    floatingGlass: store.get("floatingGlass"),
+    theme: store.get("theme"),
+    windowOpacity: store.get("windowOpacity"),
+    alwaysOnTop: store.get("alwaysOnTop"),
+    menuBarMode: store.get("menuBarMode"),
+    launchAtLogin: store.get("launchAtLogin"),
+    spellCheck: store.get("spellCheck"),
+    scheduleDelayMs: store.get("scheduleDelayMs"),
+  }
+
+  mainWindow.webContents.send("open-settings-modal", fullConfig);
+}
+
+
+ipcMain.on("update-setting", (event, { key, value }) => {
+  store.set(key, value);
+  
+  // Handle specific side effects
+  switch (key) {
+    case "blockReadReceipts":
+      updateRequestBlocker();
+      mainWindow.webContents.send("set-block-read-receipts", value);
+      break;
+    case "blockTypingIndicator":
+      updateRequestBlocker();
+      mainWindow.webContents.send("set-block-typing-indicator", value);
+      break;
+    case "clipboardSanitize":
+      mainWindow.webContents.send("update-config", { clipboardSanitize: value });
+      break;
+    case "modernLook":
+      if (value) store.set("floatingGlass", false);
+      applyModernLook();
+      applyFloatingGlass();
+      break;
+    case "floatingGlass":
+      if (value) store.set("modernLook", false);
+      applyModernLook();
+      applyFloatingGlass();
+      break;
+    case "alwaysOnTop":
+      mainWindow.setAlwaysOnTop(value);
+      break;
+    case "launchAtLogin":
+      app.setLoginItemSettings({ openAtLogin: value });
+      break;
+    case "spellCheck":
+      mainWindow.webContents.session.setSpellCheckerEnabled(value);
+      break;
+  }
+  
+  updateMenu();
+});
+
+ipcMain.on("edit-custom-css", () => {
+  editCustomCSS();
+});
 
 // IPC handler for CSS input result
 ipcMain.on("css-input-result", (event, css) => {
@@ -1175,12 +1380,8 @@ ipcMain.on("css-input-result", (event, css) => {
 function applyCustomCSS() {
   if (!mainWindow) return;
   const css = store.get("customCSS");
-  mainWindow.webContents.removeInsertedCSS("custom-css").catch(() => {});
-  if (css) {
-    mainWindow.webContents
-      .insertCSS(css, { cssKey: "custom-css" })
-      .catch(() => {});
-  }
+  // We now delegate CSS application to preload.js so it can be responsive to chat backgrounds
+  mainWindow.webContents.send("apply-custom-css", css);
 }
 
 function clearCustomCSS() {
@@ -1396,325 +1597,336 @@ function updateMenu() {
       label: "Unleashed",
       submenu: [
         {
-          label: "Always on Top",
-          type: "checkbox",
-          checked: alwaysOnTop,
-          accelerator: "CmdOrCtrl+Shift+T",
-          click: toggleAlwaysOnTop,
+          label: "Open Settings...",
+          accelerator: "CmdOrCtrl+,",
+          click: openSettingsUI,
         },
         { type: "separator" },
         {
-          label: "Theme",
+          label: "Privacy & Stealth",
           submenu: [
             {
-              label: "Default",
-              type: "radio",
-              checked: theme === "default",
-              click: () => applyTheme("default"),
+              label: "Block Read Receipts",
+              type: "checkbox",
+              checked: blockReadReceipts,
+              click: toggleBlockReadReceipts,
+            },
+            {
+              label: "Block Typing Indicator",
+              type: "checkbox",
+              checked: blockTypingIndicator,
+              click: toggleBlockTypingIndicator,
             },
             { type: "separator" },
             {
-              label: "OLED Dark",
-              type: "radio",
-              checked: theme === "oled",
-              click: () => applyTheme("oled"),
+              label: "Clipboard Sanitizer",
+              type: "checkbox",
+              checked: clipboardSanitize,
+              click: toggleClipboardSanitize,
             },
             {
-              label: "Nord",
-              type: "radio",
-              checked: theme === "nord",
-              click: () => applyTheme("nord"),
+              label: "Keyword Alerts",
+              type: "checkbox",
+              checked: keywordAlertsEnabled,
+              click: toggleKeywordAlerts,
             },
-            {
-              label: "Dracula",
-              type: "radio",
-              checked: theme === "dracula",
-              click: () => applyTheme("dracula"),
-            },
-            {
-              label: "Solarized Dark",
-              type: "radio",
-              checked: theme === "solarized",
-              click: () => applyTheme("solarized"),
-            },
-            {
-              label: "High Contrast",
-              type: "radio",
-              checked: theme === "highcontrast",
-              click: () => applyTheme("highcontrast"),
-            },
-            { type: "separator" },
-            {
-              label: "Crimson",
-              type: "radio",
-              checked: theme === "crimson",
-              click: () => applyTheme("crimson"),
-            },
-            {
-              label: "Electric Crimson",
-              type: "radio",
-              checked: theme === "electriccrimson",
-              click: () => applyTheme("electriccrimson"),
-            },
-            {
-              label: "Neon Coral",
-              type: "radio",
-              checked: theme === "neoncoral",
-              click: () => applyTheme("neoncoral"),
-            },
-            {
-              label: "Inferno Orange",
-              type: "radio",
-              checked: theme === "infernoorange",
-              click: () => applyTheme("infernoorange"),
-            },
-            {
-              label: "Solar Gold",
-              type: "radio",
-              checked: theme === "solargold",
-              click: () => applyTheme("solargold"),
-            },
-            {
-              label: "Acid Lime",
-              type: "radio",
-              checked: theme === "acidlime",
-              click: () => applyTheme("acidlime"),
-            },
-            {
-              label: "Emerald Flash",
-              type: "radio",
-              checked: theme === "emeraldflash",
-              click: () => applyTheme("emeraldflash"),
-            },
-            {
-              label: "Cyber Teal",
-              type: "radio",
-              checked: theme === "cyberteal",
-              click: () => applyTheme("cyberteal"),
-            },
-            {
-              label: "Electric Blue",
-              type: "radio",
-              checked: theme === "electricblue",
-              click: () => applyTheme("electricblue"),
-            },
-            {
-              label: "Ultraviolet",
-              type: "radio",
-              checked: theme === "ultraviolet",
-              click: () => applyTheme("ultraviolet"),
-            },
-            {
-              label: "Hot Magenta",
-              type: "radio",
-              checked: theme === "hotmagenta",
-              click: () => applyTheme("hotmagenta"),
-            },
-            { type: "separator" },
-            {
-              label: "Compact",
-              type: "radio",
-              checked: theme === "compact",
-              click: () => applyTheme("compact"),
-            },
-          ],
-        },
-        { type: "separator" },
-        {
-          label: "Focus Mode",
-          type: "checkbox",
-          checked: focusMode,
-          accelerator: "CmdOrCtrl+Shift+F",
-          click: toggleFocusMode,
-        },
-        {
-          label: "Do Not Disturb",
-          type: "checkbox",
-          checked: dnd,
-          accelerator: "CmdOrCtrl+Shift+D",
-          click: toggleDoNotDisturb,
-        },
-        { type: "separator" },
-        {
-          label: "Quick Replies",
-          submenu: quickReplies.map((qr) => ({
-            label: `Send: ${qr.text}`,
-            accelerator: `CmdOrCtrl+Shift+${qr.key}`,
-            click: () => sendQuickReply(qr.text),
-          })),
-        },
-        { type: "separator" },
-        {
-          label: "Focus Search",
-          accelerator: "CmdOrCtrl+K",
-          click: focusSearch,
-        },
-        {
-          label: `Send in ${Math.round(scheduleDelayMs / 1000)}s`,
-          accelerator: "CmdOrCtrl+Alt+Enter",
-          click: scheduleSendNow,
-        },
-        {
-          label: "Schedule Delay",
-          submenu: [
-            {
-              label: "5s",
-              type: "radio",
-              checked: scheduleDelayMs === 5000,
-              click: () => setScheduleDelay(5000),
-            },
-            {
-              label: "30s",
-              type: "radio",
-              checked: scheduleDelayMs === 30000,
-              click: () => setScheduleDelay(30000),
-            },
-            {
-              label: "2 min",
-              type: "radio",
-              checked: scheduleDelayMs === 120000,
-              click: () => setScheduleDelay(120000),
-            },
-          ],
-        },
-        { type: "separator" },
-        {
-          label: "Clipboard Sanitizer",
-          type: "checkbox",
-          checked: clipboardSanitize,
-          click: toggleClipboardSanitize,
-        },
-        {
-          label: "Keyword Alerts",
-          type: "checkbox",
-          checked: keywordAlertsEnabled,
-          click: toggleKeywordAlerts,
-        },
-        { label: "Edit Keyword Alerts...", click: editKeywordAlerts },
-        { type: "separator" },
-        {
-          label: "Picture in Picture",
-          accelerator: "CmdOrCtrl+Shift+P",
-          click: createPipWindow,
-        },
-        { type: "separator" },
-        {
-          label: "Menu Bar Mode",
-          type: "checkbox",
-          checked: menuBarMode,
-          click: toggleMenuBarMode,
-        },
-        {
-          label: "Launch at Login",
-          type: "checkbox",
-          checked: launchAtLogin,
-          click: toggleLaunchAtLogin,
-        },
-        { type: "separator" },
-        {
-          label: "Block Read Receipts",
-          type: "checkbox",
-          checked: blockReadReceipts,
-          click: toggleBlockReadReceipts,
-        },
-        {
-          label: "Block Typing Indicator",
-          type: "checkbox",
-          checked: blockTypingIndicator,
-          click: toggleBlockTypingIndicator,
-        },
-        {
-          label: "Spell Check",
-          type: "checkbox",
-          checked: spellCheck,
-          click: toggleSpellCheck,
-        },
-        { type: "separator" },
-        {
-          label: "Window Opacity",
-          submenu: [
-            {
-              label: "100%",
-              type: "radio",
-              checked: windowOpacity === 1.0,
-              click: () => setWindowOpacity(1.0),
-            },
-            {
-              label: "90%",
-              type: "radio",
-              checked: windowOpacity === 0.9,
-              click: () => setWindowOpacity(0.9),
-            },
-            {
-              label: "80%",
-              type: "radio",
-              checked: windowOpacity === 0.8,
-              click: () => setWindowOpacity(0.8),
-            },
-            {
-              label: "70%",
-              type: "radio",
-              checked: windowOpacity === 0.7,
-              click: () => setWindowOpacity(0.7),
-            },
-            {
-              label: "60%",
-              type: "radio",
-              checked: windowOpacity === 0.6,
-              click: () => setWindowOpacity(0.6),
-            },
+            { label: "Edit Keywords...", click: editKeywordAlerts },
           ],
         },
         {
-          label: "Custom CSS",
+          label: "Appearance",
           submenu: [
             {
-              label: customCSS ? "Edit Custom CSS..." : "Add Custom CSS...",
-              click: editCustomCSS,
+              label: "Theme",
+              submenu: [
+                {
+                  label: "Default",
+                  type: "radio",
+                  checked: theme === "default",
+                  click: () => applyTheme("default"),
+                },
+                { type: "separator" },
+                {
+                  label: "OLED Dark",
+                  type: "radio",
+                  checked: theme === "oled",
+                  click: () => applyTheme("oled"),
+                },
+                {
+                  label: "Nord",
+                  type: "radio",
+                  checked: theme === "nord",
+                  click: () => applyTheme("nord"),
+                },
+                {
+                  label: "Dracula",
+                  type: "radio",
+                  checked: theme === "dracula",
+                  click: () => applyTheme("dracula"),
+                },
+                {
+                  label: "Solarized Dark",
+                  type: "radio",
+                  checked: theme === "solarized",
+                  click: () => applyTheme("solarized"),
+                },
+                {
+                  label: "High Contrast",
+                  type: "radio",
+                  checked: theme === "highcontrast",
+                  click: () => applyTheme("highcontrast"),
+                },
+                { type: "separator" },
+                {
+                  label: "Vibrant Colors",
+                  submenu: [
+                    {
+                      label: "Crimson",
+                      type: "radio",
+                      checked: theme === "crimson",
+                      click: () => applyTheme("crimson"),
+                    },
+                    {
+                      label: "Electric Crimson",
+                      type: "radio",
+                      checked: theme === "electriccrimson",
+                      click: () => applyTheme("electriccrimson"),
+                    },
+                    {
+                      label: "Neon Coral",
+                      type: "radio",
+                      checked: theme === "neoncoral",
+                      click: () => applyTheme("neoncoral"),
+                    },
+                    {
+                      label: "Inferno Orange",
+                      type: "radio",
+                      checked: theme === "infernoorange",
+                      click: () => applyTheme("infernoorange"),
+                    },
+                    {
+                      label: "Solar Gold",
+                      type: "radio",
+                      checked: theme === "solargold",
+                      click: () => applyTheme("solargold"),
+                    },
+                    {
+                      label: "Acid Lime",
+                      type: "radio",
+                      checked: theme === "acidlime",
+                      click: () => applyTheme("acidlime"),
+                    },
+                    {
+                      label: "Emerald Flash",
+                      type: "radio",
+                      checked: theme === "emeraldflash",
+                      click: () => applyTheme("emeraldflash"),
+                    },
+                    {
+                      label: "Cyber Teal",
+                      type: "radio",
+                      checked: theme === "cyberteal",
+                      click: () => applyTheme("cyberteal"),
+                    },
+                    {
+                      label: "Electric Blue",
+                      type: "radio",
+                      checked: theme === "electricblue",
+                      click: () => applyTheme("electricblue"),
+                    },
+                    {
+                      label: "Ultraviolet",
+                      type: "radio",
+                      checked: theme === "ultraviolet",
+                      click: () => applyTheme("ultraviolet"),
+                    },
+                    {
+                      label: "Hot Magenta",
+                      type: "radio",
+                      checked: theme === "hotmagenta",
+                      click: () => applyTheme("hotmagenta"),
+                    },
+                  ],
+                },
+                { type: "separator" },
+                {
+                  label: "Compact Mode",
+                  type: "radio",
+                  checked: theme === "compact",
+                  click: () => applyTheme("compact"),
+                },
+              ],
             },
             {
-              label: "Clear Custom CSS",
-              enabled: !!customCSS,
-              click: clearCustomCSS,
-            },
-          ],
-        },
-        { type: "separator" },
-        {
-          label: "Previous Chat",
-          accelerator: "CmdOrCtrl+Up",
-          click: () => navigateConversation("up"),
-        },
-        {
-          label: "Next Chat",
-          accelerator: "CmdOrCtrl+Down",
-          click: () => navigateConversation("down"),
-        },
-        { type: "separator" },
-        {
-          label: "Session",
-          submenu: [
-            { label: "Export Session...", click: exportCookies },
-            { label: "Import Session...", click: importCookies },
-            { type: "separator" },
-            { label: "Clear Session (Logout)", click: clearSession },
-          ],
-        },
-        { type: "separator" },
-        {
-          label: "Theme Creator...",
-          click: () => shell.openExternal("https://mstheme.pcstyle.dev"),
-        },
-        { type: "separator" },
-        {
-          label: "EXPERIMENTAL",
-          submenu: [
-            {
-              label: "Modern Look",
+              label: "Modern Look (Floating)",
               type: "checkbox",
               checked: store.get("modernLook"),
               click: toggleModernLook,
             },
+            {
+              label: "Floating Glass (Theme Override)",
+              type: "checkbox",
+              checked: store.get("floatingGlass"),
+              click: toggleFloatingGlass,
+            },
+            {
+              label: "Focus Mode",
+              type: "checkbox",
+              checked: focusMode,
+              accelerator: "CmdOrCtrl+Shift+F",
+              click: toggleFocusMode,
+            },
+            { type: "separator" },
+            {
+              label: "Window Opacity",
+              submenu: [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4].map((op) => ({
+                label: `${op * 100}%`,
+                type: "radio",
+                checked: windowOpacity === op,
+                click: () => setWindowOpacity(op),
+              })),
+            },
+            {
+              label: "Custom CSS",
+              submenu: [
+                {
+                  label: customCSS ? "Edit CSS..." : "Add CSS...",
+                  click: editCustomCSS,
+                },
+                {
+                  label: "Clear CSS",
+                  enabled: !!customCSS,
+                  click: clearCustomCSS,
+                },
+              ],
+            },
+            { type: "separator" },
+            {
+              label: "Theme Creator...",
+              click: () => shell.openExternal("https://mstheme.pcstyle.dev"),
+            },
+          ],
+        },
+        {
+          label: "Power Tools",
+          submenu: [
+            {
+              label: "Scheduled Messages",
+              submenu: [
+                {
+                  label: `Send in ${Math.round(scheduleDelayMs / 1000)}s Now`,
+                  accelerator: "CmdOrCtrl+Alt+Enter",
+                  click: scheduleSendNow,
+                },
+                { type: "separator" },
+                {
+                  label: "Delay: 5s",
+                  type: "radio",
+                  checked: scheduleDelayMs === 5000,
+                  click: () => setScheduleDelay(5000),
+                },
+                {
+                  label: "Delay: 30s",
+                  type: "radio",
+                  checked: scheduleDelayMs === 30000,
+                  click: () => setScheduleDelay(30000),
+                },
+                {
+                  label: "Delay: 60s",
+                  type: "radio",
+                  checked: scheduleDelayMs === 60000,
+                  click: () => setScheduleDelay(60000),
+                },
+                {
+                  label: "Delay: 2 min",
+                  type: "radio",
+                  checked: scheduleDelayMs === 120000,
+                  click: () => setScheduleDelay(120000),
+                },
+              ],
+            },
+            {
+              label: "Quick Replies",
+              submenu: quickReplies.map((qr) => ({
+                label: `[${qr.key}] ${qr.text}`,
+                accelerator: `CmdOrCtrl+Shift+${qr.key}`,
+                click: () => sendQuickReply(qr.text),
+              })),
+            },
+            { type: "separator" },
+            {
+              label: "Picture in Picture",
+              accelerator: "CmdOrCtrl+Shift+P",
+              click: createPipWindow,
+            },
+            {
+              label: "Do Not Disturb",
+              type: "checkbox",
+              checked: dnd,
+              accelerator: "CmdOrCtrl+Shift+D",
+              click: toggleDoNotDisturb,
+            },
+          ],
+        },
+        {
+          label: "Navigation",
+          submenu: [
+            {
+              label: "Focus Search",
+              accelerator: "CmdOrCtrl+K",
+              click: focusSearch,
+            },
+            { type: "separator" },
+            {
+              label: "Previous Chat",
+              accelerator: "CmdOrCtrl+Up",
+              click: () => navigateConversation("up"),
+            },
+            {
+              label: "Next Chat",
+              accelerator: "CmdOrCtrl+Down",
+              click: () => navigateConversation("down"),
+            },
+          ],
+        },
+        { type: "separator" },
+        {
+          label: "App Settings",
+          submenu: [
+            {
+              label: "Always on Top",
+              type: "checkbox",
+              checked: alwaysOnTop,
+              accelerator: "CmdOrCtrl+Shift+T",
+              click: toggleAlwaysOnTop,
+            },
+            {
+              label: "Menu Bar Mode",
+              type: "checkbox",
+              checked: menuBarMode,
+              click: toggleMenuBarMode,
+            },
+            {
+              label: "Launch at Login",
+              type: "checkbox",
+              checked: launchAtLogin,
+              click: toggleLaunchAtLogin,
+            },
+            {
+              label: "Spell Check",
+              type: "checkbox",
+              checked: spellCheck,
+              click: toggleSpellCheck,
+            },
+          ],
+        },
+        {
+          label: "Session Management",
+          submenu: [
+            { label: "Export Cookies...", click: exportCookies },
+            { label: "Import Cookies...", click: importCookies },
+            { type: "separator" },
+            { label: "Logout (Clear Session)", click: clearSession },
           ],
         },
       ],
@@ -1829,6 +2041,7 @@ function createWindow() {
     );
 
     applyModernLook();
+    applyFloatingGlass();
   });
 
   mainWindow.on("resize", () => {
