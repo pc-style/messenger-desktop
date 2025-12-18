@@ -1,7 +1,7 @@
 {
   "name": "messenger-unleashed",
   "productName": "Messenger Unleashed",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "Messenger desktop app with extra features",
   "main": "main.js",
   "scripts": {
@@ -23,11 +23,17 @@
     "productName": "Messenger Unleashed",
     "mac": {
       "category": "public.app-category.social-networking",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "icon": "icon.icns"
     },
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "icon.ico"
     },
     "nsis": {
@@ -37,8 +43,16 @@
     "dmg": {
       "title": "Messenger Unleashed",
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "files": [
