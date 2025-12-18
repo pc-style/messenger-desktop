@@ -8,7 +8,8 @@
     "dev": "electron .",
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win"
+    "build:win": "electron-builder --win",
+    "bump": "node scripts/bump.js"
   },
   "dependencies": {
     "electron-store": "^8.1.0"
