@@ -815,7 +815,15 @@ async function checkForUpdates() {
       });
       response.on("end", () => {
         const latestVersion = data.trim();
-        if (latestVersion && latestVersion !== CURRENT_VERSION) {
+        const normalize = (v) => v.replace(/^v/, "");
+        const normalizedLatest = normalize(latestVersion);
+        const normalizedCurrent = normalize(CURRENT_VERSION);
+
+        if (
+          latestVersion &&
+          normalizedLatest !== normalizedCurrent &&
+          !latestVersion.startsWith("<!DOCTYPE")
+        ) {
           dialog
             .showMessageBox(mainWindow, {
               type: "info",
