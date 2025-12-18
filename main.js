@@ -12,6 +12,7 @@ const {
 const path = require("path");
 const fs = require("fs");
 const Store = require("electron-store");
+const { net } = require("electron");
 
 const store = new Store({
   defaults: {
@@ -36,6 +37,7 @@ const store = new Store({
     blockTypingIndicator: false,
     windowOpacity: 1.0,
     customCSS: "",
+    modernLook: false,
   },
 });
 
@@ -795,9 +797,127 @@ async function editCustomCSS() {
       }
       store.set("customCSS", css);
       applyCustomCSS();
-      updateMenu();
     }
   }
+}
+
+async function checkForUpdates() {
+  const CURRENT_VERSION = app.getVersion();
+  const VERSION_URL =
+    "https://raw.githubusercontent.com/pcstyle/messenger-desktop/main/.version";
+
+  try {
+    const request = net.request(VERSION_URL);
+    request.on("response", (response) => {
+      let data = "";
+      response.on("data", (chunk) => {
+        data += chunk;
+      });
+      response.on("end", () => {
+        const latestVersion = data.trim();
+        if (latestVersion && latestVersion !== CURRENT_VERSION) {
+          dialog
+            .showMessageBox(mainWindow, {
+              type: "info",
+              title: "Update Available",
+              message: `A new version (${latestVersion}) is available. Your current version is ${CURRENT_VERSION}.`,
+              buttons: ["Download and Update", "Later"],
+              defaultId: 0,
+            })
+            .then(({ response }) => {
+              if (response === 0) {
+                shell.openExternal(
+                  "https://github.com/pcstyle/messenger-desktop/releases"
+                );
+              }
+            });
+        }
+        // Save local .version file
+        const versionPath = path.join(app.getPath("userData"), ".version");
+        fs.writeFileSync(versionPath, latestVersion || CURRENT_VERSION);
+      });
+    });
+    request.on("error", (err) => {
+      console.error("Update check failed:", err);
+    });
+    request.end();
+  } catch (err) {
+    console.error("Update check request error:", err);
+  }
+}
+
+function applyModernLook() {
+  if (!mainWindow) return;
+  const enabled = store.get("modernLook");
+  mainWindow.webContents.removeInsertedCSS("modern-look").catch(() => {});
+
+  if (enabled) {
+    // These rules aim for the modern look in the image: rounded corners, floating elements, etc.
+    const modernCSS = `
+      :root {
+        --modern-radius: 16px !important;
+        --modern-spacing: 12px !important;
+      }
+      
+      /* Rounded main containers */
+      div[role="main"], 
+      div[aria-label="Chats"], 
+      div[role="navigation"] {
+        border-radius: var(--modern-radius) !important;
+        margin: var(--modern-spacing) !important;
+        overflow: hidden !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+      }
+
+      /* Compact and rounded left sidebar icons */
+      div[role="navigation"] a, 
+      div[role="navigation"] div[role="button"] {
+        border-radius: 50% !important;
+        margin: 8px auto !important;
+      }
+
+      /* Rounded search bar */
+      input[aria-label="Search Messenger"], 
+      input[placeholder*="Search"] {
+        border-radius: 20px !important;
+        padding: 8px 16px !important;
+      }
+
+      /* Rounded message bubbles */
+      div[role="row"] div[style*="border-radius"] {
+        border-radius: 18px !important;
+      }
+
+      /* Floating effect for the whole app content if possible */
+      body {
+        background-color: #000 !important;
+        padding: 4px !important;
+      }
+
+      /* Modern scrollbars */
+      ::-webkit-scrollbar {
+        width: 6px !important;
+        height: 6px !important;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.2) !important;
+        border-radius: 10px !important;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent !important;
+      }
+    `;
+    mainWindow.webContents
+      .insertCSS(modernCSS, { cssKey: "modern-look" })
+      .catch(() => {});
+  }
+}
+
+function toggleModernLook() {
+  const current = store.get("modernLook");
+  store.set("modernLook", !current);
+  applyModernLook();
+  updateMenu();
 }
 
 // IPC handler for CSS input result
@@ -1350,6 +1470,18 @@ function updateMenu() {
           label: "Theme Creator...",
           click: () => shell.openExternal("https://mstheme.pcstyle.dev"),
         },
+        { type: "separator" },
+        {
+          label: "EXPERIMENTAL",
+          submenu: [
+            {
+              label: "Modern Look",
+              type: "checkbox",
+              checked: store.get("modernLook"),
+              click: toggleModernLook,
+            },
+          ],
+        },
       ],
     },
     {
@@ -1460,6 +1592,8 @@ function createWindow() {
       "set-block-typing-indicator",
       store.get("blockTypingIndicator")
     );
+
+    applyModernLook();
   });
 
   mainWindow.on("resize", () => {
@@ -1521,6 +1655,7 @@ app.whenReady().then(() => {
   }
 
   createWindow();
+  checkForUpdates();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
