@@ -1168,14 +1168,11 @@ function applyModernLook() {
 function toggleModernLook() {
   const current = store.get("modernLook");
   const newValue = !current;
-  store.set("modernLook", newValue);
   
   if (newValue) {
-    // Disable Floating Glass if enabled to avoid conflict
-    if (store.get("floatingGlass")) {
-      store.set("floatingGlass", false);
-    }
+    store.set("floatingGlass", false);
   }
+  store.set("modernLook", newValue);
 
   applyModernLook();
   applyFloatingGlass();
@@ -1185,14 +1182,11 @@ function toggleModernLook() {
 function toggleFloatingGlass() {
   const current = store.get("floatingGlass");
   const newValue = !current;
-  store.set("floatingGlass", newValue);
   
   if (newValue) {
-    // Disable Modern Look if enabled to avoid conflict
-    if (store.get("modernLook")) {
-      store.set("modernLook", false);
-    }
+    store.set("modernLook", false);
   }
+  store.set("floatingGlass", newValue);
 
   applyModernLook();
   applyFloatingGlass();
@@ -1360,6 +1354,10 @@ ipcMain.on("update-setting", (event, { key, value }) => {
   }
   
   updateMenu();
+});
+
+ipcMain.on("edit-custom-css", () => {
+  editCustomCSS();
 });
 
 // IPC handler for CSS input result

@@ -12,6 +12,7 @@ export default async function Home() {
     version = content.trim();
   } catch (error) {
     console.error("Failed to read .version file:", error);
+    version = "Unknown Version";
   }
 
   return <HomeClient version={version} />;
