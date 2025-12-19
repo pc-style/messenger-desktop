@@ -242,6 +242,18 @@ export default function HomeClient({ version }: { version: string }) {
             <p>Strip tracking metadata from pasted content. Keep your pastes clean.</p>
           </div>
 
+          <div className={`${styles.featureCard} ${styles.featureCardPrivacy} ${styles.animateIn}`}>
+            <div className={`${styles.featureIcon} ${styles.featureIconCyan}`}>{Icons.focus}</div>
+            <h3>Block Active Status</h3>
+            <p>Appear offline while still seeing others. The ultimate lurking tool.</p>
+          </div>
+
+          <div className={`${styles.featureCard} ${styles.featureCardPrivacy} ${styles.animateIn}`}>
+            <div className={`${styles.featureIcon} ${styles.featureIconCyan}`}>{Icons.lock}</div>
+            <h3>Invisible Ink</h3>
+            <p>Send hidden messages that only reveal when hovered. Local encryption.</p>
+          </div>
+
           <div className={`${styles.featureCard} ${styles.featureCardPower} ${styles.animateIn}`}>
             <div className={`${styles.featureIcon} ${styles.featureIconOrange}`}>{Icons.clock}</div>
             <h3>Scheduled Messages</h3>
@@ -302,6 +314,12 @@ export default function HomeClient({ version }: { version: string }) {
             <div className={`${styles.featureIcon} ${styles.featureIconPurple}`}>{Icons.focus}</div>
             <h3>Focus Mode</h3>
             <p>Hide the chat list for distraction-free conversations.</p>
+          </div>
+
+          <div className={`${styles.featureCard} ${styles.featureCardDesktop} ${styles.animateIn}`}>
+            <div className={`${styles.featureIcon} ${styles.featureIconPurple}`}>{Icons.window}</div>
+            <h3>Boss Mode (Chameleon)</h3>
+            <p>Instantly disguise the app as a boring Excel spreadsheet with Ctrl+B.</p>
           </div>
 
           <div className={`${styles.featureCard} ${styles.featureCardPower} ${styles.animateIn}`}>
