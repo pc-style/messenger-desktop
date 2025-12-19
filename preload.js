@@ -831,16 +831,19 @@ function setupBackgroundDetection() {
 let customStyleElement = null;
 
 function applyCustomCSS(css) {
+  const target = document.head || document.documentElement;
+  if (!target) {
+    // defer if DOM not ready
+    setTimeout(() => applyCustomCSS(css), 100);
+    return;
+  }
+
   if (!customStyleElement) {
     customStyleElement = document.createElement('style');
     customStyleElement.id = 'unleashed-custom-css';
-    document.head.appendChild(customStyleElement);
+    target.appendChild(customStyleElement);
   }
   
-  // Wrap CSS to respect Messenger's custom backgrounds
-  // We prepend a selector that only applies if body doesn't have the custom-bg class
-  // Note: This is a bit naive, but it works for simple overrides.
-  // A better way is to provide the user with the class and let them use it.
   customStyleElement.textContent = css;
 }
 
