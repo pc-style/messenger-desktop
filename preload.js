@@ -327,7 +327,6 @@ function showSettingsModal(config) {
   `
 
   const style = document.createElement('style')
-  updateTheme();
   document.head.appendChild(style)
 
   const header = document.createElement('div')
@@ -339,7 +338,7 @@ function showSettingsModal(config) {
   mainTitle.style.cssText = `margin: 0; font-size: 20px; font-weight: 700; color: ${textColor};`
   
   const subTitle = document.createElement('div')
-  subTitle.textContent = 'v1.1.11 — Settings'
+  subTitle.textContent = `v${config.version || '1.1.11'} — Settings`
   subTitle.style.cssText = `font-size: 12px; color: ${subTextColor}; font-weight: 500; margin-top: 2px;`
   
   titleGroup.append(mainTitle, subTitle)
@@ -551,6 +550,9 @@ function showSettingsModal(config) {
   overlay.appendChild(modal)
   document.body.appendChild(overlay)
   
+  // Update theme once everything is created to ensure references (mainTitle etc) exist
+  updateTheme();
+
   overlay.onclick = (e) => { 
     if (e.target === overlay) {
       mediaQuery.removeEventListener('change', updateTheme);

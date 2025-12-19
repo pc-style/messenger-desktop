@@ -229,8 +229,6 @@ function updateRequestBlocker() {
     urls: [
       "https://*.messenger.com/*",
       "https://*.facebook.com/*",
-      "https://*-edge-chat.facebook.com/*",
-      "https://*-edge-chat.messenger.com/*",
     ],
   };
 
@@ -470,7 +468,8 @@ function applyTheme(theme) {
   store.set("theme", theme);
   updateMenu();
 
-  mainWindow.webContents.reloadIgnoringCache();
+  // Instant apply instead of full reload
+  applyThemeCSS(theme);
 }
 
 function toggleAlwaysOnTop() {
@@ -1341,6 +1340,7 @@ function openSettingsUI() {
   
   // Send the full config so the Settings UI knows what's enabled
   const fullConfig = {
+    version: app.getVersion(),
     blockReadReceipts: store.get("blockReadReceipts"),
     blockActiveStatus: store.get("blockActiveStatus"),
     blockTypingIndicator: store.get("blockTypingIndicator"),
@@ -2232,6 +2232,13 @@ function createWindow() {
   }
 
   updateMenu();
+
+  // Suppress Permissions Policy: unload violations
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    const responseHeaders = { ...details.responseHeaders };
+    responseHeaders["Permissions-Policy"] = ["unload=*"];
+    callback({ responseHeaders });
+  });
 }
 
 app.on("ready", () => {
