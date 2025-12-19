@@ -113,7 +113,7 @@ jobs:
   build-windows:
     needs: check-version
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && needs.check-version.outputs.release_exists == 'false')
-    runs-on: blacksmith-4vcpu-windows-2025
+    runs-on: windows-latest
     permissions:
       contents: write
     steps:
@@ -172,7 +172,7 @@ jobs:
 
   release:
     needs: [check-version, build-macos, build-windows]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.check-version.outputs.release_exists == 'false'
     permissions:
       contents: write
