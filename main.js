@@ -139,32 +139,22 @@ function isTypingIndicatorPayload(body) {
   }
 
   // raw JSON (GraphQL or REST)
+  // Aggressively search for typing keywords in the raw body string
+  // This covers JSON, URL-encoded, and multipart bodies
+  const rawBody = body.toString();
+  if (
+    rawBody.includes("SendTypingIndicator") ||
+    rawBody.includes("typing_indicator") ||
+    rawBody.includes("typing") && (rawBody.includes("true") || rawBody.includes("1")) // stricter check for generic "typing"
+  ) {
+    return true;
+  }
+  
+  // Keep the structured checks just in case
   const json = tryJSON(body);
   if (json) {
-    if (Array.isArray(json)) {
-      if (
-        json.some(
-          (item) =>
-            item?.variables?.is_typing === true ||
-            item?.variables?.typing === true ||
-            item?.name === "SendTypingIndicator"
-        )
-      )
-        return true;
-    } else if (
-      json.variables?.is_typing === true ||
-      json.is_typing === true ||
-      json.typing === true ||
-      json.name === "SendTypingIndicator" ||
-      json.mutation?.includes("SendTypingIndicator")
-    ) {
-      return true;
-    }
-  }
-
-  // Fallback string check
-  if (body.includes("SendTypingIndicator") || body.includes("typing_state")) {
-    return true;
+    if (json.name === "SendTypingIndicator" || json.mutation?.includes("SendTypingIndicator")) return true;
+    if (json.variables?.is_typing === true || json.variables?.typing === true) return true;
   }
 
   return false;
@@ -269,12 +259,15 @@ function updateRequestBlocker() {
         return callback({ cancel: true });
       }
       
-      // DEBUG: Log any presence/typing related URL that wasn't blocked
-      if (
-        (url.includes("typing") || url.includes("presence") || body.includes("typing")) &&
-        !url.includes("blocked_") // prevent loops if we ever redirect
-      ) {
-         console.log(`\x1b[36m[Unleashed] [TRACE] Potential typing Traffic: ${url.slice(0, 100)}\x1b[0m`);
+      // DEBUG: Log any active traffic to see what we missed
+      if (!url.includes("blocked_") && !url.includes("ping")) {
+         if (url.includes("graphql")) {
+            // console.log(`\x1b[36m[Unleashed] [GraphQL] ${url} | Body len: ${body.length}\x1b[0m`);
+            if (body.includes("typing")) console.log(`\x1b[35m[Unleashed] [MISSED TYPING] In GraphQL: ${url}\x1b[0m`);
+         }
+         else if (url.includes("bnzai") || url.includes("typing")) {
+            // console.log(`\x1b[90m[Unleashed] [Banzai/Typing] ${url.slice(0, 100)}\x1b[0m`);
+         }
       }
 
       return callback({});
