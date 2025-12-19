@@ -6,7 +6,8 @@ let config = {
   keywordAlertsEnabled: false,
   clipboardSanitize: false,
   scheduleDelayMs: 30000,
-  blockTypingIndicator: false
+  blockTypingIndicator: false,
+  shortcuts: {}
 }
 
 let blockReadReceipts = false
@@ -72,6 +73,66 @@ ipcRenderer.on('show-css-input', (_, currentValue) => {
     }
   }, true) // use textarea for CSS
 })
+
+ipcRenderer.on('set-chameleon-mode', (_, enabled) => {
+  toggleChameleonMode(enabled)
+})
+
+function toggleChameleonMode(enabled) {
+  let overlay = document.getElementById('chameleon-overlay')
+  
+  if (!enabled) {
+    if (overlay) overlay.style.display = 'none'
+    return
+  }
+  
+  if (!overlay) {
+    overlay = document.createElement('div')
+    overlay.id = 'chameleon-overlay'
+    // Fake Excel Spreadsheet Look
+    overlay.innerHTML = `
+      <div style="display:flex; flex-direction:column; width:100%; height:100%; font-family: Calibri, Arial, sans-serif; background: #fff; color: #000;">
+        <div style="background:#217346; height:30px; display:flex; align-items:center; padding:0 10px;">
+          <div style="color:white; font-size:13px; font-weight:bold;">Book1 - Excel</div>
+        </div>
+        <div style="background:#f3f2f1; border-bottom:1px solid #e1dfdd; height:40px; display:flex; align-items:center; padding:0 10px;">
+           <div style="margin-right:20px; font-size:14px;">File</div>
+           <div style="margin-right:20px; font-size:14px;">Home</div>
+           <div style="margin-right:20px; font-size:14px;">Insert</div>
+           <div style="margin-right:20px; font-size:14px;">Page Layout</div>
+           <div style="margin-right:20px; font-size:14px;">Formulas</div>
+           <div style="margin-right:20px; font-size:14px;">Data</div>
+        </div>
+        <div style="background:#f3f2f1; height:30px; border-bottom:1px solid #dadbdc; display:flex; align-items:center; padding-left:40px; font-size:12px; color:#444;">
+          A1 &nbsp;&nbsp; ✕ &nbsp; ✓ &nbsp; <span style="background:white; border:1px solid #ccc; padding:2px 10px; width:300px;">Q3 Financial Projections</span>
+        </div>
+        <div style="display:grid; grid-template-columns: 40px repeat(10, 1fr); flex:1; overflow:hidden;">
+          <div style="background:#f3f2f1; border-right:1px solid #dadbdc; border-bottom:1px solid #dadbdc;"></div>
+          ${['A','B','C','D','E','F','G','H','I','J'].map(c => `
+             <div style="background:#f3f2f1; border-right:1px solid #dadbdc; border-bottom:1px solid #dadbdc; display:flex; align-items:center; justify-content:center; color:#666; font-size:12px;">${c}</div>
+          `).join('')}
+          ${Array.from({length: 40}).map((_, i) => `
+             <div style="background:#f3f2f1; border-right:1px solid #dadbdc; border-bottom:1px solid #e1dfdd; display:flex; align-items:center; justify-content:center; color:#666; font-size:12px;">${i+1}</div>
+             ${['','','','','','','','','',''].map(() => `
+               <div style="border-right:1px solid #e1dfdd; border-bottom:1px solid #e1dfdd; padding:2px;"></div>
+             `).join('')}
+          `).join('')}
+        </div>
+        <div style="height:25px; background:#f3f2f1; border-top:1px solid #e1dfdd; display:flex; align-items:center; padding-left:10px;">
+           <div style="background:white; padding:2px 10px; border:1px solid #ccc; font-size:12px;">Sheet1</div>
+        </div>
+      </div>
+    `
+    overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: white; z-index: 2147483647;
+      display: none;
+    `
+    document.body.appendChild(overlay)
+  }
+  
+  overlay.style.display = 'block'
+}
 
 // safe input modal (runs in preload context, not page context)
 function showInputModal(title, message, defaultValue, callback, useTextarea = false) {
@@ -257,7 +318,7 @@ function showSettingsModal(config) {
   mainTitle.style.cssText = `margin: 0; font-size: 20px; font-weight: 700; color: ${textColor};`
   
   const subTitle = document.createElement('div')
-  subTitle.textContent = 'v1.1.8 — Settings'
+  subTitle.textContent = 'v1.1.9 — Settings'
   subTitle.style.cssText = `font-size: 12px; color: ${subTextColor}; font-weight: 500; margin-top: 2px;`
   
   titleGroup.append(mainTitle, subTitle)
@@ -353,7 +414,101 @@ function showSettingsModal(config) {
   systemSection.append(createToggleRow('Launch at Login', 'Start the app automatically.', 'launchAtLogin', config.launchAtLogin))
   systemSection.append(createToggleRow('Spell Check', 'Check spelling as you type.', 'spellCheck', config.spellCheck))
 
-  scrollArea.append(privacySection, appearanceSection, systemSection)
+  systemSection.append(createToggleRow('Spell Check', 'Check spelling as you type.', 'spellCheck', config.spellCheck))
+
+  // Shortcuts Section
+  const shortcutSection = document.createElement('div')
+  shortcutSection.className = 'settings-section'
+  const shortcutTitle = document.createElement('h4')
+  shortcutTitle.textContent = 'Keyboard Shortcuts'
+  shortcutSection.append(shortcutTitle)
+  
+  const shortcutsDesc = document.createElement('div')
+  shortcutsDesc.textContent = 'Click on a shortcut to record a new one. Press Escape to cancel.'
+  shortcutsDesc.style.cssText = `font-size: 12px; color: ${subTextColor}; margin-bottom: 12px;`
+  shortcutSection.append(shortcutsDesc)
+
+  const shortcutList = document.createElement('div')
+  
+  const friendlyNames = {
+    "toggleAlwaysOnTop": "Always on Top",
+    "toggleDoNotDisturb": "Do Not Disturb",
+    "toggleFocusMode": "Focus Mode",
+    "createPipWindow": "Picture-in-Picture",
+    "focusSearch": "Search",
+    "scheduleSendNow": "Send Scheduled",
+    "bossKey": "Boss Key (Chameleon)"
+  }
+
+  const renderShortcuts = () => {
+    shortcutList.innerHTML = ''
+    const currentShortcuts = config.shortcuts || {}
+    Object.entries(currentShortcuts).forEach(([action, accelerator]) => {
+      const row = document.createElement('div')
+      row.className = 'settings-row'
+      
+      const label = document.createElement('div')
+      label.className = 'settings-label'
+      label.textContent = friendlyNames[action] || action
+      
+      const keyDisplay = document.createElement('button')
+      keyDisplay.className = 'settings-btn'
+      keyDisplay.textContent = accelerator || 'Not Set'
+      keyDisplay.style.fontFamily = 'Menlo, Monaco, monospace'
+      keyDisplay.style.minWidth = '80px'
+      
+      keyDisplay.onclick = () => {
+        keyDisplay.textContent = 'Recording...'
+        keyDisplay.classList.add('primary')
+        
+        const handler = (e) => {
+          e.preventDefault()
+          if (e.key === 'Escape') {
+             keyDisplay.textContent = accelerator
+             keyDisplay.classList.remove('primary')
+             document.removeEventListener('keydown', handler)
+             return
+          }
+          
+          let keys = []
+          if (e.metaKey) keys.push('CmdOrCtrl')
+          if (e.ctrlKey && !e.metaKey) keys.push('CmdOrCtrl') // map Win Ctrl to same
+          if (e.altKey) keys.push('Alt')
+          if (e.shiftKey) keys.push('Shift')
+          
+          // ignore standalone modifiers
+          if (['Meta','Control','Alt','Shift'].includes(e.key)) return
+          
+          let char = e.key.toUpperCase()
+          // basic mapping for electron accelerator
+          if (char === ' ') char = 'Space'
+          if (char === 'ENTER') char = 'Enter'
+          if (char === 'ARROWUP') char = 'Up'
+          if (char === 'ARROWDOWN') char = 'Down'
+          
+          keys.push(char)
+          const newAccelerator = keys.join('+')
+          
+          ipcRenderer.send('update-shortcut', { action, accelerator: newAccelerator })
+          
+          // Optimistically update
+          config.shortcuts[action] = newAccelerator
+          renderShortcuts()
+          
+          document.removeEventListener('keydown', handler)
+        }
+        document.addEventListener('keydown', handler)
+      }
+      
+      row.append(label, keyDisplay)
+      shortcutList.append(row)
+    })
+  }
+  
+  renderShortcuts()
+  shortcutSection.append(shortcutList)
+
+  scrollArea.append(privacySection, appearanceSection, systemSection, shortcutSection)
 
   const footer = document.createElement('div')
   footer.className = 'close-area'
@@ -672,4 +827,196 @@ window.addEventListener('DOMContentLoaded', () => {
   setupClipboardSanitizer()
   setupKeywordAlerts()
   setupBackgroundDetection()
+  setupInvisibleInk() // Steganography
+  setInterval(scrapeActiveChat, 2000)
 })
+
+function scrapeActiveChat() {
+  const activeLink = document.querySelector('div[role="navigation"] a[aria-current="page"]') ||
+                     document.querySelector('div[aria-label="Chats"] a[aria-current="page"]');
+  if (!activeLink) return;
+
+  // Try to find avatar image
+  const img = activeLink.querySelector('img') || 
+              activeLink.querySelector('svg mask image');
+  
+  if (!img) return;
+
+  const src = img.src || img.getAttribute('xlink:href');
+  if (!src) return;
+
+  ipcRenderer.send('update-active-chat', { src });
+}
+
+// --- Invisible Ink (Steganography) ---
+const INVISIBLE_ZERO = '\u200B'
+const INVISIBLE_ONE = '\u200C'
+const INVISIBLE_SPLIT = '\u200D'
+
+function asciiToBinary(str) {
+  return str.split('').map(char => {
+    return char.charCodeAt(0).toString(2).padStart(8, '0')
+  }).join('')
+}
+
+function binaryToAscii(bin) {
+  return bin.match(/.{1,8}/g).map(byte => {
+    return String.fromCharCode(parseInt(byte, 2))
+  }).join('')
+}
+
+function encodeInvisible(text) {
+  const binary = asciiToBinary(text)
+  return INVISIBLE_SPLIT + binary.split('').map(b => b === '0' ? INVISIBLE_ZERO : INVISIBLE_ONE).join('') + INVISIBLE_SPLIT
+}
+
+function decodeInvisible(text) {
+  // Extract invisible invisible sequence
+  const pattern = new RegExp(`${INVISIBLE_SPLIT}([${INVISIBLE_ZERO}${INVISIBLE_ONE}]+)${INVISIBLE_SPLIT}`)
+  const match = text.match(pattern)
+  if (!match) return null
+  
+  const binary = match[1].split('').map(c => c === INVISIBLE_ZERO ? '0' : '1').join('')
+  return binaryToAscii(binary)
+}
+
+function setupInvisibleInk() {
+  let isInvisibleMode = false
+  const innocentPhrases = [
+    "Sounds good to me.", "I'll check it out.", "Okay, let me know.", 
+    "Just finishing up here.", "That's interesting.", "Can we talk later?",
+    "Hey, what's up?", "Got it.", "No worries.", "See you soon.",
+    "Thanks for the update.", "I agree.", "On my way."
+  ]
+
+  // UI Injection
+  const injectToggle = () => {
+    const actions = document.querySelector('div[aria-label="Message actions"]') || 
+                    document.querySelector('div[aria-label="Conversation actions"]')
+    
+    // Look for the input area container to attach
+    const inputArea = document.querySelector('div[role="textbox"]')
+    if (!inputArea) return
+
+    if (document.getElementById('invisible-ink-toggle')) return
+
+    const btn = document.createElement('div')
+    btn.id = 'invisible-ink-toggle'
+    btn.innerHTML = '🔒'
+    btn.title = "Invisible Ink Mode"
+    btn.style.cssText = `
+      position: absolute; bottom: 100%; right: 20px;
+      width: 30px; height: 30px; background: rgba(0,0,0,0.5);
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; z-index: 100; margin-bottom: 5px;
+      font-size: 16px; transition: all 0.2s;
+    `
+    btn.onclick = () => {
+      isInvisibleMode = !isInvisibleMode
+      const input = document.querySelector('div[role="textbox"]')
+      
+      if (isInvisibleMode) {
+        btn.style.background = '#0084ff'
+        btn.innerHTML = '👻'
+        if (input) {
+            input.setAttribute('data-placeholder-original', input.getAttribute('aria-label') || '')
+            // visual feedback
+            input.style.border = '2px solid #0084ff'
+        }
+      } else {
+        btn.style.background = 'rgba(0,0,0,0.5)'
+        btn.innerHTML = '🔒'
+        if (input) input.style.border = 'none'
+      }
+    }
+    
+    // Attach near input
+    const container = inputArea.closest('div[role="none"]') || inputArea.parentElement
+    if (container) {
+        container.style.position = 'relative'
+        container.appendChild(btn)
+    }
+  }
+
+  // Poll for UI
+  setInterval(injectToggle, 2000)
+
+  // Intercept Sending
+  document.addEventListener('keydown', (e) => {
+    if (!isInvisibleMode) return
+    if (e.key === 'Enter' && !e.shiftKey) {
+        const input = document.querySelector('div[role="textbox"]')
+        if (!input) return
+        
+        const secret = input.innerText.trim()
+        if (!secret) return
+        
+        e.preventDefault()
+        e.stopPropagation()
+        
+        // Encode
+        const innocent = innocentPhrases[Math.floor(Math.random() * innocentPhrases.length)]
+        const payload = innocent + ' ' + encodeInvisible(secret)
+        
+        // Replace and Send
+        
+        // Using strict execCommand for Messenger compatibility
+        document.execCommand('selectAll', false, null)
+        document.execCommand('insertText', false, payload)
+        
+        // Let React state catch up then dispatch enter
+        setTimeout(() => {
+            const enter = new KeyboardEvent('keydown', {
+                bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13
+            })
+            input.dispatchEvent(enter)
+        }, 50)
+        
+        // Reset (optional, React usually clears it)
+        isInvisibleMode = false
+        const btn = document.getElementById('invisible-ink-toggle')
+        if (btn) {
+            btn.style.background = 'rgba(0,0,0,0.5)'
+            btn.innerHTML = '🔒'
+            input.style.border = 'none'
+        }
+    }
+  }, true)
+
+  // Decoder Observer
+  const decodeObserver = new MutationObserver((mutations) => {
+    document.querySelectorAll('div[dir="auto"]').forEach(el => {
+        if (el.dataset.scanned) return
+        const text = el.innerText
+        if (text && text.includes(INVISIBLE_SPLIT)) {
+            const secret = decodeInvisible(text)
+            if (secret) {
+                el.innerText = ' ' // clear
+                
+                const lock = document.createElement('span')
+                lock.textContent = '🔒 '
+                
+                const secretSpan = document.createElement('span')
+                secretSpan.textContent = secret
+                secretSpan.style.color = '#ff4400'
+                secretSpan.style.fontWeight = 'bold'
+                secretSpan.style.backgroundColor = 'rgba(255,255,0,0.1)'
+                secretSpan.style.padding = '2px 4px'
+                secretSpan.style.borderRadius = '4px'
+
+                const originalSpan = document.createElement('span')
+                originalSpan.textContent = ` (${text.replace(INVISIBLE_SPLIT, '').substring(0, 10)}...)`
+                originalSpan.style.fontSize = '10px'
+                originalSpan.style.opacity = '0.5'
+                
+                el.appendChild(lock)
+                el.appendChild(secretSpan)
+                el.appendChild(originalSpan)
+                el.dataset.scanned = 'true'
+            }
+        }
+    })
+  })
+  
+  decodeObserver.observe(document.body, { childList: true, subtree: true, characterData: true })
+}

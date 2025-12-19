@@ -39,8 +39,21 @@ const store = new Store({
     customCSS: "",
     modernLook: false,
     floatingGlass: false,
+    shortcuts: {
+      "toggleAlwaysOnTop": "CmdOrCtrl+Shift+T",
+      "toggleDoNotDisturb": "CmdOrCtrl+Shift+D",
+      "toggleFocusMode": "CmdOrCtrl+Shift+F",
+      "createPipWindow": "CmdOrCtrl+Shift+P",
+      "focusSearch": "CmdOrCtrl+K",
+      "scheduleSendNow": "CmdOrCtrl+Alt+Enter",
+      "bossKey": "CmdOrCtrl+Shift+B"
+    }
   },
 });
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId(app.name);
+}
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -1377,6 +1390,30 @@ ipcMain.on("css-input-result", (event, css) => {
   updateMenu();
 });
 
+ipcMain.on("update-shortcut", (event, { action, accelerator }) => {
+  const shortcuts = store.get("shortcuts") || {};
+  shortcuts[action] = accelerator;
+  store.set("shortcuts", shortcuts);
+  registerGlobalShortcuts();
+  mainWindow.webContents.send("update-config", { shortcuts });
+});
+
+ipcMain.on("toggle-chameleon", () => {
+  toggleChameleonMode();
+});
+
+let chameleonMode = false;
+function toggleChameleonMode() {
+  chameleonMode = !chameleonMode;
+  if (!mainWindow) return;
+  mainWindow.webContents.send("set-chameleon-mode", chameleonMode);
+  if (chameleonMode) {
+    if (process.platform === "darwin" && app.dock) app.dock.setBadge("");
+  } else {
+    updateUnreadBadge(unreadCount);
+  }
+}
+
 function applyCustomCSS() {
   if (!mainWindow) return;
   const css = store.get("customCSS");
@@ -1411,7 +1448,7 @@ async function exportCookies() {
     const allCookies = [...cookies, ...facebookCookies];
 
     fs.writeFileSync(filePath, JSON.stringify(allCookies, null, 2));
-    dialog.showMessageBox(mainWindow, {
+  dialog.showMessageBox(mainWindow, {
       type: "info",
       title: "Export Complete",
       message: `Exported ${allCookies.length} cookies`,
@@ -1419,6 +1456,82 @@ async function exportCookies() {
   } catch (err) {
     dialog.showErrorBox("Export Failed", err.message);
   }
+}
+
+// --- Chat Head Logic ---
+let chatHeadWindow = null;
+let activeChatInfo = null;
+
+ipcMain.on("update-active-chat", (event, info) => {
+  activeChatInfo = info;
+  if (chatHeadWindow && !chatHeadWindow.isDestroyed()) {
+     chatHeadWindow.webContents.send('update-head', info);
+  }
+});
+
+ipcMain.on("chat-head-clicked", () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  if (chatHeadWindow) chatHeadWindow.hide();
+});
+
+function createChatHead() {
+  if (chatHeadWindow && !chatHeadWindow.isDestroyed()) {
+    chatHeadWindow.show();
+    chatHeadWindow.webContents.send('update-head', activeChatInfo);
+    return;
+  }
+
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width } = primaryDisplay.workAreaSize;
+
+  chatHeadWindow = new BrowserWindow({
+    width: 70,
+    height: 70,
+    x: width - 90,
+    y: 100,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    hasShadow: false,
+    skipTaskbar: true,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+
+  const html = `
+    <html>
+      <body style="margin:0; padding:5px; overflow:hidden; background:transparent; -webkit-app-region: drag;">
+        <div id="avatar" style="width:54px; height:54px; border-radius:50%; background-color:#333; background-size:cover; background-position:center; border:3px solid #0084ff; box-shadow: 0 4px 12px rgba(0,0,0,0.5); cursor:pointer; transition: transform 0.1s;"></div>
+        <script>
+          const { ipcRenderer } = require('electron');
+          const avatar = document.getElementById('avatar');
+          avatar.onclick = () => ipcRenderer.send('chat-head-clicked');
+          avatar.onmouseenter = () => avatar.style.transform = 'scale(1.1)';
+          avatar.onmouseleave = () => avatar.style.transform = 'scale(1.0)';
+          
+          ipcRenderer.on('update-head', (_, info) => {
+             if (info.src) avatar.style.backgroundImage = 'url(' + info.src + ')';
+          });
+        </script>
+      </body>
+    </html>
+  `;
+
+  chatHeadWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  
+  chatHeadWindow.webContents.on('did-finish-load', () => {
+     if (activeChatInfo) {
+        chatHeadWindow.webContents.send('update-head', activeChatInfo);
+     }
+  });
 }
 
 async function importCookies() {
@@ -2042,6 +2155,19 @@ function createWindow() {
 
     applyModernLook();
     applyFloatingGlass();
+    applyFloatingGlass();
+  });
+
+  mainWindow.on("minimize", () => {
+    if (activeChatInfo && activeChatInfo.src) {
+       createChatHead();
+    }
+  });
+
+  mainWindow.on("restore", () => {
+    if (chatHeadWindow) {
+      chatHeadWindow.hide();
+    }
   });
 
   mainWindow.on("resize", () => {
@@ -2066,14 +2192,23 @@ function createWindow() {
 }
 
 app.on("ready", () => {
-  const { globalShortcut } = require("electron");
+  registerGlobalShortcuts();
+});
 
-  globalShortcut.register("CmdOrCtrl+Shift+T", toggleAlwaysOnTop);
-  globalShortcut.register("CmdOrCtrl+Shift+D", toggleDoNotDisturb);
-  globalShortcut.register("CmdOrCtrl+Shift+F", toggleFocusMode);
-  globalShortcut.register("CmdOrCtrl+Shift+P", createPipWindow);
-  globalShortcut.register("CmdOrCtrl+K", focusSearch);
-  globalShortcut.register("CmdOrCtrl+Alt+Enter", scheduleSendNow);
+function registerGlobalShortcuts() {
+  const { globalShortcut } = require("electron");
+  globalShortcut.unregisterAll();
+
+  const shortcuts = store.get("shortcuts") || {};
+
+  if (shortcuts.toggleAlwaysOnTop) globalShortcut.register(shortcuts.toggleAlwaysOnTop, toggleAlwaysOnTop);
+  if (shortcuts.toggleDoNotDisturb) globalShortcut.register(shortcuts.toggleDoNotDisturb, toggleDoNotDisturb);
+  if (shortcuts.toggleFocusMode) globalShortcut.register(shortcuts.toggleFocusMode, toggleFocusMode);
+  if (shortcuts.createPipWindow) globalShortcut.register(shortcuts.createPipWindow, createPipWindow);
+  if (shortcuts.focusSearch) globalShortcut.register(shortcuts.focusSearch, focusSearch);
+  if (shortcuts.scheduleSendNow) globalShortcut.register(shortcuts.scheduleSendNow, scheduleSendNow);
+  
+  if (shortcuts.bossKey) globalShortcut.register(shortcuts.bossKey, toggleChameleonMode);
 
   globalShortcut.register("CmdOrCtrl+Up", () => navigateConversation("up"));
   globalShortcut.register("CmdOrCtrl+Down", () => navigateConversation("down"));
@@ -2084,7 +2219,7 @@ app.on("ready", () => {
       sendQuickReply(qr.text)
     );
   });
-});
+}
 
 app.whenReady().then(() => {
   const launchAtLogin = store.get("launchAtLogin");
