@@ -248,13 +248,13 @@ function updateRequestBlocker() {
       
       // Check read receipts blocking
       if (blockReadReceipts && shouldBlockReadReceipt(url, body)) {
-        console.log("[Unleashed] Blocked read receipt:", url.slice(0, 100));
+        console.log(`\x1b[31m[Unleashed] 🚫 BLOCKED READ RECEIPT:\x1b[0m ${url}`);
         return callback({ cancel: true });
       }
       
       // Check typing indicator blocking
       if (blockTypingIndicator && shouldBlockTyping(url, body)) {
-        console.log("[Unleashed] Blocked typing indicator:", url.slice(0, 100));
+        console.log(`\x1b[33m[Unleashed] 🚫 BLOCKED TYPING INDICATOR:\x1b[0m ${url}`);
         return callback({ cancel: true });
       }
       
