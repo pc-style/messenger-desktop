@@ -15,6 +15,7 @@ const { net } = require("electron");
 const Store = require("electron-store");
 
 app.isQuiting = false;
+app.setName("Messenger Unleashed");
 
 const gotTheLock = app.requestSingleInstanceLock();
 
