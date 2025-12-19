@@ -932,6 +932,7 @@ function setupInvisibleInk() {
       border-radius: 50%; display: flex; align-items: center; justify-content: center;
       cursor: pointer; z-index: 100; margin-bottom: 5px;
       font-size: 16px; transition: all 0.2s;
+      color: white;
     `
     btn.onclick = () => {
       isInvisibleMode = !isInvisibleMode
