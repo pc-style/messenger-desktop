@@ -20,6 +20,8 @@ const debugWebSocketBlocker =
   process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === '1'
 const debugWebSocketBlockerDecode = process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === '1'
 const debugWebSocketTypingTrace = process.env.DEBUG_REQUEST_BLOCKER_WS_TRACE_TYPING === '1'
+const expTypingOverlay = process.env.EXP_BLOCK_TYPING_OVERLAY === '1'
+const isMainFrame = typeof process !== 'undefined' ? process.isMainFrame : true
 
 const textDecoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8') : null
 
@@ -168,9 +170,121 @@ function updateVisibilityState() {
   }
 }
 
+// [EXP] Overlay input to avoid native typing signals (opt-in via env)
+let typingOverlayInterval = null
+let typingOverlayState = { input: null, overlay: null }
+
+function cleanupTypingOverlay() {
+  if (typingOverlayState.overlay) typingOverlayState.overlay.remove()
+  if (typingOverlayState.input) {
+    typingOverlayState.input.style.opacity = ''
+    typingOverlayState.input.style.pointerEvents = ''
+    typingOverlayState.input.style.caretColor = ''
+  }
+  typingOverlayState = { input: null, overlay: null }
+}
+
+function installTypingOverlay() {
+  if (!isMainFrame || !expTypingOverlay) return
+  const input =
+    document.querySelector('div[role="textbox"][contenteditable="true"]') ||
+    document.querySelector('div[contenteditable="true"]') ||
+    document.querySelector('div[aria-label="Message"]')
+  if (!input) {
+    cleanupTypingOverlay()
+    return
+  }
+
+  if (typingOverlayState.input && typingOverlayState.input !== input) {
+    cleanupTypingOverlay()
+  }
+
+  if (!typingOverlayState.overlay) {
+    const overlay = document.createElement('div')
+    overlay.id = 'unleashed-typing-overlay'
+    overlay.setAttribute('contenteditable', 'true')
+    overlay.setAttribute('role', 'textbox')
+    overlay.setAttribute('aria-label', 'Message')
+    overlay.style.cssText = `
+      position: absolute;
+      inset: 0;
+      z-index: 99999;
+      background: transparent;
+      outline: none;
+      white-space: pre-wrap;
+      overflow-wrap: break-word;
+    `
+
+    overlay.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.shiftKey) return
+      event.preventDefault()
+      event.stopPropagation()
+
+      const text = overlay.innerText || ''
+      if (!text.trim()) return
+      if (!typingOverlayState.input) return
+
+      const target = typingOverlayState.input
+      target.focus()
+      document.execCommand('selectAll', false, null)
+      document.execCommand('insertText', false, text)
+      target.dispatchEvent(new Event('input', { bubbles: true }))
+
+      const enterEvent = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 13,
+        bubbles: true,
+        cancelable: true
+      })
+      target.dispatchEvent(enterEvent)
+
+      overlay.innerHTML = ''
+      overlay.focus()
+    }, true)
+
+    const container = input.closest('div[role="none"]') || input.parentElement
+    if (container) {
+      container.style.position = 'relative'
+      container.appendChild(overlay)
+    }
+
+    const style = window.getComputedStyle(input)
+    overlay.style.fontFamily = style.fontFamily
+    overlay.style.fontSize = style.fontSize
+    overlay.style.fontWeight = style.fontWeight
+    overlay.style.lineHeight = style.lineHeight
+    overlay.style.color = style.color
+    overlay.style.letterSpacing = style.letterSpacing
+    overlay.style.padding = style.padding
+    overlay.style.textAlign = style.textAlign
+
+    input.style.opacity = '0'
+    input.style.pointerEvents = 'none'
+    input.style.caretColor = 'transparent'
+
+    typingOverlayState = { input, overlay }
+  }
+}
+
+function updateTypingOverlayState() {
+  const shouldEnable = expTypingOverlay && blockTypingIndicator
+  if (shouldEnable && !typingOverlayInterval) {
+    typingOverlayInterval = setInterval(installTypingOverlay, 1000)
+    installTypingOverlay()
+    return
+  }
+  if (!shouldEnable && typingOverlayInterval) {
+    clearInterval(typingOverlayInterval)
+    typingOverlayInterval = null
+    cleanupTypingOverlay()
+  }
+}
+
 // typing indicator blocking handled here for WebSocket payloads; keep flag for UI reflection
 ipcRenderer.on('set-block-typing-indicator', (_, enabled) => {
   blockTypingIndicator = enabled
+  updateTypingOverlayState()
 })
 
 ipcRenderer.on('show-keyword-input', (_, currentValue) => {

@@ -351,6 +351,145 @@ function updateRequestBlocker() {
   }
 }
 
+function getAllFramesForWebContents(contents) {
+  if (!contents || contents.isDestroyed()) return [];
+  const mainFrame = contents.mainFrame;
+  if (!mainFrame) return [];
+  return Array.isArray(mainFrame.framesInSubtree)
+    ? mainFrame.framesInSubtree
+    : [mainFrame];
+}
+
+function buildWebSocketProxyInstallScript() {
+  return `
+    (() => {
+      if (!window || window.__unleashedWsProxyInstalled || !window.WebSocket) return;
+      window.__unleashedWsProxyInstalled = true;
+
+      const OriginalWebSocket = window.WebSocket;
+      const decoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8') : null;
+      const decodePayload = (data) => {
+        if (!data) return '';
+        if (typeof data === 'string') return data;
+        try {
+          if (data instanceof ArrayBuffer) {
+            const bytes = new Uint8Array(data);
+            return decoder ? decoder.decode(bytes) : '';
+          }
+          if (ArrayBuffer.isView(data)) {
+            const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+            return decoder ? decoder.decode(bytes) : '';
+          }
+        } catch (_) {}
+        return '';
+      };
+      const shouldBlockTypingPayload = (text) => {
+        if (!text) return false;
+        return text.toLowerCase().includes('is_typing');
+      };
+      const shouldBlockActiveStatusPayload = (text) => {
+        if (!text) return false;
+        if (text.includes('USER_ACTIVITY_UPDATE_SUBSCRIBE')) return true;
+        if (text.includes('USER_ACTIVITY_UPDATE')) return true;
+        const lower = text.toLowerCase();
+        if (lower.includes('presence') && lower.includes('active')) return true;
+        if (lower.includes('active_status')) return true;
+        return false;
+      };
+
+      function WebSocketProxy(url, protocols) {
+        const ws = protocols ? new OriginalWebSocket(url, protocols) : new OriginalWebSocket(url);
+        const originalSend = ws.send;
+
+        ws.send = function (data) {
+          const blockTypingIndicator = !!window.__unleashedBlockTypingIndicator;
+          const blockActiveStatus = !!window.__unleashedBlockActiveStatus;
+          const debugWebSocketBlocker = !!window.__unleashedDebugWsBlocker;
+          const debugWebSocketBlockerDecode = !!window.__unleashedDebugWsBlockerDecode;
+          const debugWebSocketTypingTrace = !!window.__unleashedDebugWsTypingTrace;
+
+          if (blockTypingIndicator || blockActiveStatus || debugWebSocketTypingTrace) {
+            const decoded = decodePayload(data);
+            if (decoded) {
+              const isTypingPayload = shouldBlockTypingPayload(decoded);
+              const blockTyping = blockTypingIndicator && isTypingPayload;
+              const blockActive = blockActiveStatus && shouldBlockActiveStatusPayload(decoded);
+
+              if (debugWebSocketTypingTrace && isTypingPayload) {
+                let preview = '';
+                if (debugWebSocketBlockerDecode) {
+                  preview = ' payload=' + decoded.slice(0, 220);
+                }
+                console.log('[Unleashed] [WS-TYPING] ' + url + ' blocked=' + blockTypingIndicator + preview);
+              }
+
+              if (blockTyping || blockActive) {
+                if (debugWebSocketBlocker) {
+                  const reason = blockTyping ? 'typing' : 'active-status';
+                  let preview = '';
+                  if (debugWebSocketBlockerDecode) {
+                    preview = ' payload=' + decoded.slice(0, 220);
+                  }
+                  console.log('[Unleashed] [WS-BLOCKED] ' + reason + ' ' + url + preview);
+                }
+                return;
+              }
+            }
+          }
+          return originalSend.call(ws, data);
+        };
+
+        return ws;
+      }
+
+      WebSocketProxy.prototype = OriginalWebSocket.prototype;
+      WebSocketProxy.CONNECTING = OriginalWebSocket.CONNECTING;
+      WebSocketProxy.OPEN = OriginalWebSocket.OPEN;
+      WebSocketProxy.CLOSING = OriginalWebSocket.CLOSING;
+      WebSocketProxy.CLOSED = OriginalWebSocket.CLOSED;
+
+      window.WebSocket = WebSocketProxy;
+    })();
+  `;
+}
+
+function syncWebSocketProxyFlags() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const blockTypingIndicator = !!store.get("blockTypingIndicator");
+  const blockActiveStatus = !!store.get("blockActiveStatus");
+  const debugWebSocketBlocker =
+    process.env.DEBUG_REQUEST_BLOCKER_WS === "1" ||
+    process.env.DEBUG_REQUEST_BLOCKER_WS_ALL === "1" ||
+    process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === "1";
+  const debugWebSocketBlockerDecode = process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === "1";
+  const debugWebSocketTypingTrace = process.env.DEBUG_REQUEST_BLOCKER_WS_TRACE_TYPING === "1";
+
+  const script = `
+    (() => {
+      window.__unleashedBlockTypingIndicator = ${blockTypingIndicator ? "true" : "false"};
+      window.__unleashedBlockActiveStatus = ${blockActiveStatus ? "true" : "false"};
+      window.__unleashedDebugWsBlocker = ${debugWebSocketBlocker ? "true" : "false"};
+      window.__unleashedDebugWsBlockerDecode = ${debugWebSocketBlockerDecode ? "true" : "false"};
+      window.__unleashedDebugWsTypingTrace = ${debugWebSocketTypingTrace ? "true" : "false"};
+    })();
+  `;
+
+  for (const frame of getAllFramesForWebContents(mainWindow.webContents)) {
+    if (!frame || frame.detached) continue;
+    frame.executeJavaScript(script, true).catch(() => {});
+  }
+}
+
+function ensureWebSocketProxyInstalled() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const installScript = buildWebSocketProxyInstallScript();
+  for (const frame of getAllFramesForWebContents(mainWindow.webContents)) {
+    if (!frame || frame.detached) continue;
+    frame.executeJavaScript(installScript, true).catch(() => {});
+  }
+  syncWebSocketProxyFlags();
+}
+
 // Legacy function kept for compatibility, now delegates to unified handler
 function updateTypingBlocker(enabled) {
   store.set("blockTypingIndicator", enabled);
@@ -1464,10 +1603,12 @@ ipcMain.on("update-setting", (event, { key, value }) => {
       break;
     case "blockActiveStatus":
       mainWindow.webContents.send("set-block-active-status", value);
+      syncWebSocketProxyFlags();
       break;
     case "blockTypingIndicator":
       updateRequestBlocker();
       mainWindow.webContents.send("set-block-typing-indicator", value);
+      syncWebSocketProxyFlags();
       break;
     case "clipboardSanitize":
       mainWindow.webContents.send("update-config", { clipboardSanitize: value });
@@ -2341,8 +2482,14 @@ function createWindow() {
       store.get("blockTypingIndicator")
     );
 
+    ensureWebSocketProxyInstalled();
+
     applyModernLook();
     applyFloatingGlass();
+  });
+
+  mainWindow.webContents.on("did-frame-finish-load", () => {
+    ensureWebSocketProxyInstalled();
   });
 
   mainWindow.on("closed", () => {
