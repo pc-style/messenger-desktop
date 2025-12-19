@@ -2,7 +2,7 @@
 set -e
 
 APP_NAME="Messenger Unleashed"
-REPO="nicholaspcstyle/messenger-desktop"
+REPO="pcstyleorg/messenger-desktop"
 INSTALL_DIR="/Applications"
 
 echo "Messenger Unleashed Installer"

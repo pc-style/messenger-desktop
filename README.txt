@@ -40,4 +40,4 @@ Apple requires developers to pay $99/year for a certificate to sign
 apps. Unsigned apps downloaded from the internet are blocked by
 default. The methods above tell macOS you trust this app.
 
-For more info: https://github.com/nicholaspcstyle/messenger-desktop
+For more info: https://github.com/pcstyleorg/messenger-desktop
