@@ -17,6 +17,7 @@ Messenger desktop app with extra features.
 ### From Releases
 
 Download from [Releases](../../releases):
+
 - **macOS**: `.dmg`
 - **Windows**: `.exe`
 
@@ -34,10 +35,10 @@ bun install && bun run build
 
 All features accessible via **Unleashed** menu or keyboard shortcuts:
 
-| Feature | Shortcut |
-|---------|----------|
-| Always on Top | `Cmd+Shift+T` |
-| Do Not Disturb | `Cmd+Shift+D` |
+| Feature            | Shortcut      |
+| ------------------ | ------------- |
+| Always on Top      | `Cmd+Shift+T` |
+| Do Not Disturb     | `Cmd+Shift+D` |
 | Picture in Picture | `Cmd+Shift+P` |
 
 Themes: **Unleashed → Theme** menu

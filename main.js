@@ -14,7 +14,7 @@ const fs = require("fs");
 const { net } = require("electron");
 const Store = require("electron-store");
 
-app.isQuiting = false;
+let isAppQuiting = false;
 app.setName("Messenger Unleashed");
 
 const gotTheLock = app.requestSingleInstanceLock();
@@ -1451,6 +1451,29 @@ function applyModernLook() {
   }
 }
 
+function applyUICleanup() {
+  if (!mainWindow) return;
+  const cleanupCSS = `
+    /* Hide Greptile / Reviewer cards */
+    div[aria-label="Reviewer"],
+    div[aria-label*="Greptile"],
+    div[class*="greptile"] {
+      display: none !important;
+      height: 0 !important;
+      width: 0 !important;
+      overflow: hidden !important;
+      visibility: hidden !important;
+    }
+
+    /* Hide Promoted / Sponsored content */
+    div[aria-label="Sponsored"],
+    div[aria-label="Promoted"] {
+      display: none !important;
+    }
+  `;
+  mainWindow.webContents.insertCSS(cleanupCSS, { cssKey: "ui-cleanup" }).catch(() => {});
+}
+
 function toggleModernLook() {
   const current = store.get("modernLook");
   const newValue = !current;
@@ -1963,7 +1986,7 @@ function updateMenu() {
         { role: "hideOthers" },
         { role: "unhide" },
         { type: "separator" },
-        { role: "quit" },
+        { role: "quit", accelerator: "CmdOrCtrl+Q" },
       ],
     },
     {
@@ -2514,6 +2537,7 @@ function createWindow() {
 
     applyModernLook();
     applyFloatingGlass();
+    applyUICleanup();
   });
 
   mainWindow.webContents.on("did-frame-finish-load", () => {
@@ -2546,7 +2570,7 @@ function createWindow() {
   });
 
   mainWindow.on("close", (event) => {
-    if (!app.isQuiting) {
+    if (!isAppQuiting) {
       event.preventDefault();
       mainWindow.hide();
     }
@@ -2639,7 +2663,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  app.isQuiting = true;
+  isAppQuiting = true;
 });
 
 app.on("will-quit", () => {

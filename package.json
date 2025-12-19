@@ -1,7 +1,7 @@
 {
   "name": "messenger-unleashed",
   "productName": "Messenger Unleashed",
-  "version": "1.1.16",
+  "version": "1.2.0",
   "description": "Messenger desktop app with extra features",
   "main": "main.js",
   "scripts": {
@@ -59,7 +59,9 @@
     "files": [
       "main.js",
       "preload.js",
-      "themes.css"
+      "dialog-preload.js",
+      "themes.css",
+      "trayIcon.png"
     ]
   }
 }

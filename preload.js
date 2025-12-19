@@ -176,94 +176,142 @@ let typingOverlayState = { input: null, overlay: null }
 
 function cleanupTypingOverlay() {
   if (typingOverlayState.overlay) typingOverlayState.overlay.remove()
+  if (typingOverlayState.interval) clearInterval(typingOverlayState.interval)
   if (typingOverlayState.input) {
     typingOverlayState.input.style.opacity = ''
     typingOverlayState.input.style.pointerEvents = ''
     typingOverlayState.input.style.caretColor = ''
+    typingOverlayState.input.style.userSelect = ''
   }
-  typingOverlayState = { input: null, overlay: null }
+  typingOverlayState = { input: null, overlay: null, interval: null }
 }
 
 function installTypingOverlay() {
-  if (!isMainFrame || !expTypingOverlayEnabled) return
+  if (!isMainFrame || !expTypingOverlayEnabled || !blockTypingIndicator) return
+  
   const input =
     document.querySelector('div[role="textbox"][contenteditable="true"]') ||
-    document.querySelector('div[contenteditable="true"]') ||
-    document.querySelector('div[aria-label="Message"]')
+    document.querySelector('div[aria-label="Message"]') ||
+    document.querySelector('div[contenteditable="true"]')
+    
   if (!input) {
     cleanupTypingOverlay()
     return
   }
 
+  // Handle cross-navigation
   if (typingOverlayState.input && typingOverlayState.input !== input) {
     cleanupTypingOverlay()
   }
 
   if (!typingOverlayState.overlay) {
+    const parent = input.parentElement
+    if (!parent) return
+
     const overlay = document.createElement('div')
     overlay.id = 'unleashed-typing-overlay'
     overlay.setAttribute('contenteditable', 'true')
     overlay.setAttribute('role', 'textbox')
-    overlay.setAttribute('aria-label', 'Message')
+    overlay.setAttribute('aria-label', 'Type privately...')
+    
+    const inputStyle = window.getComputedStyle(input)
+    
+    // Position tracking
+    const updateOverlayPosition = () => {
+      if (!input || !overlay) return
+      const rect = input.getBoundingClientRect()
+      overlay.style.top = `${rect.top}px`
+      overlay.style.left = `${rect.left}px`
+      overlay.style.width = `${rect.width}px`
+      overlay.style.height = `${rect.height}px`
+    }
+
     overlay.style.cssText = `
-      position: absolute;
-      inset: 0;
-      z-index: 99999;
-      background: transparent;
+      position: fixed;
+      z-index: 2147483647;
+      background: ${inputStyle.backgroundColor !== 'rgba(0, 0, 0, 0)' ? inputStyle.backgroundColor : '#242526'};
+      color: ${inputStyle.color || '#fff'};
+      font-family: ${inputStyle.fontFamily};
+      font-size: ${inputStyle.fontSize};
+      padding: ${inputStyle.padding};
+      border-radius: ${inputStyle.borderRadius};
       outline: none;
       white-space: pre-wrap;
       overflow-wrap: break-word;
+      box-sizing: border-box;
+      border: 1px solid rgba(255,255,255,0.1);
+      display: block;
     `
+    updateOverlayPosition()
+    document.body.appendChild(overlay)
+    
+    const posInterval = setInterval(updateOverlayPosition, 300)
 
     overlay.addEventListener('keydown', (event) => {
-      if (event.key !== 'Enter' || event.shiftKey) return
-      event.preventDefault()
-      event.stopPropagation()
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault()
+        event.stopPropagation()
 
-      const text = overlay.innerText || ''
-      if (!text.trim()) return
-      if (!typingOverlayState.input) return
+        const text = overlay.innerText.trim()
+        if (!text) return
 
-      const target = typingOverlayState.input
-      target.focus()
-      document.execCommand('selectAll', false, null)
-      document.execCommand('insertText', false, text)
-      target.dispatchEvent(new Event('input', { bubbles: true }))
+        // --- TUNNEL SEND ---
+        // Restore input temporarily
+        input.style.opacity = '1'
+        input.style.pointerEvents = 'auto'
+        input.style.visibility = 'visible'
+        input.focus()
 
-      const enterEvent = new KeyboardEvent('keydown', {
-        key: 'Enter',
-        code: 'Enter',
-        keyCode: 13,
-        bubbles: true,
-        cancelable: true
-      })
-      target.dispatchEvent(enterEvent)
+        // Clear and Insert logic (Draft.js safe)
+        const selection = window.getSelection()
+        const range = document.createRange()
+        selection.removeAllRanges()
+        range.selectNodeContents(input)
+        selection.addRange(range)
+        document.execCommand('delete', false, null)
+        document.execCommand('insertText', false, text)
+        
+        // Dispatch Input event for React
+        input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }))
 
-      overlay.innerHTML = ''
-      overlay.focus()
+        setTimeout(() => {
+          // Attempt button click first (most reliable)
+          const sendBtn = document.querySelector('div[aria-label="Press Enter to send"], div[aria-label="Send"], svg[aria-label="Send messenger"]')?.closest('div[role="button"]')
+          if (sendBtn) {
+            sendBtn.click()
+          } else {
+            // Fallback: keyboard events
+            const options = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }
+            input.dispatchEvent(new KeyboardEvent('keydown', options))
+          }
+
+          // Return to stealth mode
+          setTimeout(() => {
+            overlay.innerHTML = ''
+            input.style.opacity = '0'
+            input.style.pointerEvents = 'none'
+            input.style.visibility = 'hidden'
+            overlay.focus()
+          }, 50)
+        }, 10)
+      }
     }, true)
 
-    const container = input.closest('div[role="none"]') || input.parentElement
-    if (container) {
-      container.style.position = 'relative'
-      container.appendChild(overlay)
-    }
-
-    const style = window.getComputedStyle(input)
-    overlay.style.fontFamily = style.fontFamily
-    overlay.style.fontSize = style.fontSize
-    overlay.style.fontWeight = style.fontWeight
-    overlay.style.lineHeight = style.lineHeight
-    overlay.style.color = style.color
-    overlay.style.letterSpacing = style.letterSpacing
-    overlay.style.padding = style.padding
-    overlay.style.textAlign = style.textAlign
-
+    // Aggressive suppression of original input
     input.style.opacity = '0'
     input.style.pointerEvents = 'none'
-    input.style.caretColor = 'transparent'
+    input.style.visibility = 'hidden'
+    input.setAttribute('tabindex', '-1')
+    
+    // Block focus theft
+    input.addEventListener('focus', (e) => {
+      if (expTypingOverlayEnabled && blockTypingIndicator && document.activeElement !== overlay) {
+        overlay.focus()
+      }
+    }, true)
 
-    typingOverlayState = { input, overlay }
+    typingOverlayState = { input, overlay, interval: posInterval }
+    overlay.focus()
   }
 }
 
@@ -551,7 +599,7 @@ function showSettingsModal(config) {
   mainTitle.style.cssText = `margin: 0; font-size: 20px; font-weight: 700; color: ${textColor};`
   
   const subTitle = document.createElement('div')
-  subTitle.textContent = `v${config.version || '1.1.11'} — Settings`
+  subTitle.textContent = `v${config.version || '1.1.17'} — Settings`
   subTitle.style.cssText = `font-size: 12px; color: ${subTextColor}; font-weight: 500; margin-top: 2px;`
   
   titleGroup.append(mainTitle, subTitle)
