@@ -50,6 +50,8 @@ jobs:
     needs: check-version
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && needs.check-version.outputs.release_exists == 'false')
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -85,20 +87,35 @@ jobs:
 
       - name: Build app
         run: bun run build:mac -- --publish never
+      - name: Ensure draft release exists
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          tag="v${{ needs.check-version.outputs.version }}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --title "$tag" \
+              --draft \
+              --generate-notes
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: Messenger-macOS
-          path: |
-            dist/*.dmg
-            dist/*.zip
-          compression-level: 0
+      - name: Upload macOS artifacts to release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          tag="v${{ needs.check-version.outputs.version }}"
+          gh release upload "$tag" dist/*.dmg dist/*.zip --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   build-windows:
     needs: check-version
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && needs.check-version.outputs.release_exists == 'false')
     runs-on: blacksmith-4vcpu-windows-2025
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -130,14 +147,28 @@ jobs:
 
       - name: Build app
         run: bun run build:win -- --publish never
+      - name: Ensure draft release exists
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          tag="v${{ needs.check-version.outputs.version }}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --title "$tag" \
+              --draft \
+              --generate-notes
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: Messenger-Windows
-          path: |
-            dist/*.exe
-          compression-level: 0
+      - name: Upload Windows artifacts to release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          tag="v${{ needs.check-version.outputs.version }}"
+          gh release upload "$tag" dist/*.exe --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   release:
     needs: [check-version, build-macos, build-windows]
@@ -147,24 +178,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: Messenger-macOS
-          path: dist
-
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: Messenger-Windows
-          path: dist
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.check-version.outputs.version }}
-          name: v${{ needs.check-version.outputs.version }}
-          files: dist/*
-          generate_release_notes: true
-          make_latest: true
+      - name: Publish release
+        shell: bash
+        run: |
+          tag="v${{ needs.check-version.outputs.version }}"
+          gh release edit "$tag" --draft=false --latest
+        env:
+          GH_TOKEN: ${{ github.token }}
