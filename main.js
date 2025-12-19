@@ -230,6 +230,7 @@ function updateRequestBlocker() {
     urls: [
       "https://*.messenger.com/*",
       "https://*.facebook.com/*",
+      "http://localhost:3103/*",
     ],
   };
 
@@ -246,6 +247,11 @@ function updateRequestBlocker() {
     requestBlockerHandler = (details, callback) => {
       const url = details.url || "";
       const body = details.method === "POST" ? getRequestBody(details) : "";
+      
+      // Silently block local probes from Facebook scripts
+      if (url.includes("localhost:3103")) {
+         return callback({ cancel: true });
+      }
       
       // Check read receipts blocking
       if (blockReadReceipts && shouldBlockReadReceipt(url, body)) {
