@@ -6,12 +6,118 @@ let config = {
   keywordAlertsEnabled: false,
   clipboardSanitize: false,
   scheduleDelayMs: 30000,
-  blockTypingIndicator: false
+  blockTypingIndicator: false,
+  shortcuts: {}
 }
 
 let blockReadReceipts = false
+let blockActiveStatus = false
 let blockTypingIndicator = false
 let visibilityPatched = false
+const debugWebSocketBlocker =
+  process.env.DEBUG_REQUEST_BLOCKER_WS === '1' ||
+  process.env.DEBUG_REQUEST_BLOCKER_WS_ALL === '1' ||
+  process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === '1'
+const debugWebSocketBlockerDecode = process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === '1'
+const debugWebSocketTypingTrace = process.env.DEBUG_REQUEST_BLOCKER_WS_TRACE_TYPING === '1'
+let expTypingOverlayEnabled = process.env.EXP_BLOCK_TYPING_OVERLAY === '1'
+const isMainFrame = typeof process !== 'undefined' ? process.isMainFrame : true
+
+const textDecoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8') : null
+
+function decodeWebSocketPayload(data) {
+  if (!data) return ''
+  if (typeof data === 'string') return data
+  try {
+    if (data instanceof ArrayBuffer) {
+      const bytes = new Uint8Array(data)
+      return textDecoder ? textDecoder.decode(bytes) : Buffer.from(bytes).toString('utf8')
+    }
+    if (ArrayBuffer.isView(data)) {
+      const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      return textDecoder ? textDecoder.decode(bytes) : Buffer.from(bytes).toString('utf8')
+    }
+    if (typeof Buffer !== 'undefined' && Buffer.isBuffer(data)) {
+      return data.toString('utf8')
+    }
+  } catch (_) {}
+  return ''
+}
+
+function shouldBlockTypingPayload(text) {
+  if (!text) return false
+  return text.toLowerCase().includes('is_typing')
+}
+
+function shouldBlockActiveStatusPayload(text) {
+  if (!text) return false
+  if (text.includes('USER_ACTIVITY_UPDATE_SUBSCRIBE')) return true
+  if (text.includes('USER_ACTIVITY_UPDATE')) return true
+  const lower = text.toLowerCase()
+  if (lower.includes('presence') && lower.includes('active')) return true
+  if (lower.includes('active_status')) return true
+  return false
+}
+
+function installWebSocketInterceptor() {
+  if (typeof window === 'undefined' || !window.WebSocket) return
+  const OriginalWebSocket = window.WebSocket
+
+  function WebSocketProxy(url, protocols) {
+    const ws = protocols ? new OriginalWebSocket(url, protocols) : new OriginalWebSocket(url)
+    const originalSend = ws.send
+
+    ws.send = function (data) {
+      if (blockTypingIndicator || blockActiveStatus || debugWebSocketTypingTrace) {
+        const decoded = decodeWebSocketPayload(data)
+        if (decoded) {
+          const isTypingPayload = shouldBlockTypingPayload(decoded)
+          const blockTyping = blockTypingIndicator && isTypingPayload
+          const blockActive = blockActiveStatus && shouldBlockActiveStatusPayload(decoded)
+          if (debugWebSocketTypingTrace && isTypingPayload) {
+            let preview = ''
+            if (debugWebSocketBlockerDecode) {
+              preview = ` payload=${decoded.slice(0, 220)}`
+            }
+            console.log(`[Unleashed] [WS-TYPING] ${url} blocked=${blockTypingIndicator}${preview}`)
+          }
+          if (blockTyping || blockActive) {
+            if (debugWebSocketBlocker) {
+              const reason = blockTyping ? 'typing' : 'active-status'
+              let preview = ''
+              if (debugWebSocketBlockerDecode && decoded) {
+                preview = ` payload=${decoded.slice(0, 220)}`
+              }
+              console.log(`[Unleashed] [WS-BLOCKED] ${reason} ${url}${preview}`)
+            }
+            return
+          }
+        }
+      }
+      return originalSend.call(ws, data)
+    }
+
+    return ws
+  }
+
+  WebSocketProxy.prototype = OriginalWebSocket.prototype
+  WebSocketProxy.CONNECTING = OriginalWebSocket.CONNECTING
+  WebSocketProxy.OPEN = OriginalWebSocket.OPEN
+  WebSocketProxy.CLOSING = OriginalWebSocket.CLOSING
+  WebSocketProxy.CLOSED = OriginalWebSocket.CLOSED
+
+  window.WebSocket = WebSocketProxy
+}
+
+installWebSocketInterceptor()
+
+const ICONS = {
+  lock: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display:inline-block; vertical-align:middle;"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>',
+  ghost: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display:inline-block; vertical-align:middle;"><path d="M12 2c-4.418 0-8 3.582-8 8v10l3-2 3 2 2-2 2 2 3-2 3 2V10c0-4.418-3.582-8-8-8zm-3 9c-.828 0-1.5-.672-1.5-1.5S8.172 8 9 8s1.5.672 1.5 1.5S9.828 11 9 11zm6 0c-.828 0-1.5-.672-1.5-1.5S14.172 8 15 8s1.5.672 1.5 1.5S15.828 11 15 11z"/></svg>',
+  close: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display:inline-block; vertical-align:middle;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+  check: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style="display:inline-block; vertical-align:middle;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+  cross: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style="display:inline-block; vertical-align:middle;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>'
+}
 
 // expose minimal, safe API to renderer
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -45,16 +151,145 @@ ipcRenderer.on('update-config', (_, newConfig) => {
 
 ipcRenderer.on('set-block-read-receipts', (_, enabled) => {
   blockReadReceipts = enabled
-  if (enabled) {
+  updateVisibilityState()
+})
+
+ipcRenderer.on('set-block-active-status', (_, enabled) => {
+  blockActiveStatus = enabled
+  updateVisibilityState()
+})
+
+// Unified visibility logic
+function updateVisibilityState() {
+  // We force hidden if Active Status is blocked OR Read Receipts are blocked
+  // (Read receipts usually require visibility to trigger, so this is a safety net)
+  if (blockActiveStatus || blockReadReceipts) {
     applyVisibilityOverride()
   } else {
     restoreVisibilityOverride()
   }
-})
+}
 
-// typing indicator blocking now handled in main via webRequest; keep flag for potential UI reflection
+// [EXP] Overlay input to avoid native typing signals (opt-in via env)
+let typingOverlayInterval = null
+let typingOverlayState = { input: null, overlay: null }
+
+function cleanupTypingOverlay() {
+  if (typingOverlayState.overlay) typingOverlayState.overlay.remove()
+  if (typingOverlayState.input) {
+    typingOverlayState.input.style.opacity = ''
+    typingOverlayState.input.style.pointerEvents = ''
+    typingOverlayState.input.style.caretColor = ''
+  }
+  typingOverlayState = { input: null, overlay: null }
+}
+
+function installTypingOverlay() {
+  if (!isMainFrame || !expTypingOverlayEnabled) return
+  const input =
+    document.querySelector('div[role="textbox"][contenteditable="true"]') ||
+    document.querySelector('div[contenteditable="true"]') ||
+    document.querySelector('div[aria-label="Message"]')
+  if (!input) {
+    cleanupTypingOverlay()
+    return
+  }
+
+  if (typingOverlayState.input && typingOverlayState.input !== input) {
+    cleanupTypingOverlay()
+  }
+
+  if (!typingOverlayState.overlay) {
+    const overlay = document.createElement('div')
+    overlay.id = 'unleashed-typing-overlay'
+    overlay.setAttribute('contenteditable', 'true')
+    overlay.setAttribute('role', 'textbox')
+    overlay.setAttribute('aria-label', 'Message')
+    overlay.style.cssText = `
+      position: absolute;
+      inset: 0;
+      z-index: 99999;
+      background: transparent;
+      outline: none;
+      white-space: pre-wrap;
+      overflow-wrap: break-word;
+    `
+
+    overlay.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.shiftKey) return
+      event.preventDefault()
+      event.stopPropagation()
+
+      const text = overlay.innerText || ''
+      if (!text.trim()) return
+      if (!typingOverlayState.input) return
+
+      const target = typingOverlayState.input
+      target.focus()
+      document.execCommand('selectAll', false, null)
+      document.execCommand('insertText', false, text)
+      target.dispatchEvent(new Event('input', { bubbles: true }))
+
+      const enterEvent = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 13,
+        bubbles: true,
+        cancelable: true
+      })
+      target.dispatchEvent(enterEvent)
+
+      overlay.innerHTML = ''
+      overlay.focus()
+    }, true)
+
+    const container = input.closest('div[role="none"]') || input.parentElement
+    if (container) {
+      container.style.position = 'relative'
+      container.appendChild(overlay)
+    }
+
+    const style = window.getComputedStyle(input)
+    overlay.style.fontFamily = style.fontFamily
+    overlay.style.fontSize = style.fontSize
+    overlay.style.fontWeight = style.fontWeight
+    overlay.style.lineHeight = style.lineHeight
+    overlay.style.color = style.color
+    overlay.style.letterSpacing = style.letterSpacing
+    overlay.style.padding = style.padding
+    overlay.style.textAlign = style.textAlign
+
+    input.style.opacity = '0'
+    input.style.pointerEvents = 'none'
+    input.style.caretColor = 'transparent'
+
+    typingOverlayState = { input, overlay }
+  }
+}
+
+function updateTypingOverlayState() {
+  const shouldEnable = expTypingOverlayEnabled && blockTypingIndicator
+  if (shouldEnable && !typingOverlayInterval) {
+    typingOverlayInterval = setInterval(installTypingOverlay, 1000)
+    installTypingOverlay()
+    return
+  }
+  if (!shouldEnable && typingOverlayInterval) {
+    clearInterval(typingOverlayInterval)
+    typingOverlayInterval = null
+    cleanupTypingOverlay()
+  }
+}
+
+// typing indicator blocking handled here for WebSocket payloads; keep flag for UI reflection
 ipcRenderer.on('set-block-typing-indicator', (_, enabled) => {
   blockTypingIndicator = enabled
+  updateTypingOverlayState()
+})
+
+ipcRenderer.on('set-exp-typing-overlay', (_, enabled) => {
+  expTypingOverlayEnabled = enabled || process.env.EXP_BLOCK_TYPING_OVERLAY === '1'
+  updateTypingOverlayState()
 })
 
 ipcRenderer.on('show-keyword-input', (_, currentValue) => {
@@ -72,6 +307,66 @@ ipcRenderer.on('show-css-input', (_, currentValue) => {
     }
   }, true) // use textarea for CSS
 })
+
+ipcRenderer.on('set-chameleon-mode', (_, enabled) => {
+  toggleChameleonMode(enabled)
+})
+
+function toggleChameleonMode(enabled) {
+  let overlay = document.getElementById('chameleon-overlay')
+  
+  if (!enabled) {
+    if (overlay) overlay.style.display = 'none'
+    return
+  }
+  
+  if (!overlay) {
+    overlay = document.createElement('div')
+    overlay.id = 'chameleon-overlay'
+    // Fake Excel Spreadsheet Look
+    overlay.innerHTML = `
+      <div style="display:flex; flex-direction:column; width:100%; height:100%; font-family: Calibri, Arial, sans-serif; background: #fff; color: #000;">
+        <div style="background:#217346; height:30px; display:flex; align-items:center; padding:0 10px;">
+          <div style="color:white; font-size:13px; font-weight:bold;">Book1 - Excel</div>
+        </div>
+        <div style="background:#f3f2f1; border-bottom:1px solid #e1dfdd; height:40px; display:flex; align-items:center; padding:0 10px;">
+           <div style="margin-right:20px; font-size:14px;">File</div>
+           <div style="margin-right:20px; font-size:14px;">Home</div>
+           <div style="margin-right:20px; font-size:14px;">Insert</div>
+           <div style="margin-right:20px; font-size:14px;">Page Layout</div>
+           <div style="margin-right:20px; font-size:14px;">Formulas</div>
+           <div style="margin-right:20px; font-size:14px;">Data</div>
+        </div>
+        <div style="background:#f3f2f1; height:30px; border-bottom:1px solid #dadbdc; display:flex; align-items:center; padding-left:40px; font-size:12px; color:#444;">
+          A1 &nbsp;&nbsp; ${ICONS.cross} &nbsp; ${ICONS.check} &nbsp; <span style="background:white; border:1px solid #ccc; padding:2px 10px; width:300px;">Q3 Financial Projections</span>
+        </div>
+        <div style="display:grid; grid-template-columns: 40px repeat(10, 1fr); flex:1; overflow:hidden;">
+          <div style="background:#f3f2f1; border-right:1px solid #dadbdc; border-bottom:1px solid #dadbdc;"></div>
+          ${['A','B','C','D','E','F','G','H','I','J'].map(c => `
+             <div style="background:#f3f2f1; border-right:1px solid #dadbdc; border-bottom:1px solid #dadbdc; display:flex; align-items:center; justify-content:center; color:#666; font-size:12px;">${c}</div>
+          `).join('')}
+          ${Array.from({length: 40}).map((_, i) => `
+             <div style="background:#f3f2f1; border-right:1px solid #dadbdc; border-bottom:1px solid #e1dfdd; display:flex; align-items:center; justify-content:center; color:#666; font-size:12px;">${i+1}</div>
+             ${['','','','','','','','','',''].map(() => `
+               <div style="border-right:1px solid #e1dfdd; border-bottom:1px solid #e1dfdd; padding:2px;"></div>
+             `).join('')}
+          `).join('')}
+        </div>
+        <div style="height:25px; background:#f3f2f1; border-top:1px solid #e1dfdd; display:flex; align-items:center; padding-left:10px;">
+           <div style="background:white; padding:2px 10px; border:1px solid #ccc; font-size:12px;">Sheet1</div>
+        </div>
+      </div>
+    `
+    overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: white; z-index: 2147483647;
+      display: none;
+    `
+    document.body.appendChild(overlay)
+  }
+  
+  overlay.style.display = 'block'
+}
 
 // safe input modal (runs in preload context, not page context)
 function showInputModal(title, message, defaultValue, callback, useTextarea = false) {
@@ -245,7 +540,6 @@ function showSettingsModal(config) {
   `
 
   const style = document.createElement('style')
-  updateTheme();
   document.head.appendChild(style)
 
   const header = document.createElement('div')
@@ -257,13 +551,13 @@ function showSettingsModal(config) {
   mainTitle.style.cssText = `margin: 0; font-size: 20px; font-weight: 700; color: ${textColor};`
   
   const subTitle = document.createElement('div')
-  subTitle.textContent = 'v1.1.8 — Settings'
+  subTitle.textContent = `v${config.version || '1.1.11'} — Settings`
   subTitle.style.cssText = `font-size: 12px; color: ${subTextColor}; font-weight: 500; margin-top: 2px;`
   
   titleGroup.append(mainTitle, subTitle)
   
   const closeBtn = document.createElement('div')
-  closeBtn.innerHTML = '&times;'
+  closeBtn.innerHTML = ICONS.close
   closeBtn.style.cssText = `font-size: 24px; cursor: pointer; color: ${subTextColor}; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: background 0.2s;`
   closeBtn.onmouseenter = () => closeBtn.style.background = btnBg;
   closeBtn.onmouseleave = () => closeBtn.style.background = 'transparent';
@@ -310,17 +604,19 @@ function showSettingsModal(config) {
   const privacySection = document.createElement('div')
   privacySection.className = 'settings-section'
   const privacyTitle = document.createElement('h4')
-  privacyTitle.textContent = 'Privacy & Stealth'
+  privacyTitle.innerHTML = `${ICONS.lock} Privacy & Stealth`
   privacySection.append(privacyTitle)
   privacySection.append(createToggleRow('Block Read Receipts', 'Others won\'t know when you read messages.', 'blockReadReceipts', config.blockReadReceipts))
+  privacySection.append(createToggleRow('Block Active Status', 'Appear offline but still see others.', 'blockActiveStatus', config.blockActiveStatus))
   privacySection.append(createToggleRow('Block Typing Indicator', 'Hide "typing..." while you compose.', 'blockTypingIndicator', config.blockTypingIndicator))
+  privacySection.append(createToggleRow('[EXP] Typing Overlay (Better Typing Block)', 'Experimental: hides typing by using a proxy input overlay.', 'expTypingOverlay', config.expTypingOverlay))
   privacySection.append(createToggleRow('Clipboard Sanitizer', 'Remove tracking data from pasted URLs.', 'clipboardSanitize', config.clipboardSanitize))
   
   // Appearance Section
   const appearanceSection = document.createElement('div')
   appearanceSection.className = 'settings-section'
   const appearanceTitle = document.createElement('h4')
-  appearanceTitle.textContent = 'Appearance'
+  appearanceTitle.innerHTML = `${ICONS.ghost} Appearance`
   appearanceSection.append(appearanceTitle)
   appearanceSection.append(createToggleRow('Modern Look (Floating)', 'A lighter, floating UI design.', 'modernLook', config.modernLook))
   appearanceSection.append(createToggleRow('Floating Glass (Theme Override)', 'Premium glassmorphism aesthetics.', 'floatingGlass', config.floatingGlass))
@@ -353,7 +649,99 @@ function showSettingsModal(config) {
   systemSection.append(createToggleRow('Launch at Login', 'Start the app automatically.', 'launchAtLogin', config.launchAtLogin))
   systemSection.append(createToggleRow('Spell Check', 'Check spelling as you type.', 'spellCheck', config.spellCheck))
 
-  scrollArea.append(privacySection, appearanceSection, systemSection)
+  // Shortcuts Section
+  const shortcutSection = document.createElement('div')
+  shortcutSection.className = 'settings-section'
+  const shortcutTitle = document.createElement('h4')
+  shortcutTitle.textContent = 'Keyboard Shortcuts'
+  shortcutSection.append(shortcutTitle)
+  
+  const shortcutsDesc = document.createElement('div')
+  shortcutsDesc.textContent = 'Click on a shortcut to record a new one. Press Escape to cancel.'
+  shortcutsDesc.style.cssText = `font-size: 12px; color: ${subTextColor}; margin-bottom: 12px;`
+  shortcutSection.append(shortcutsDesc)
+
+  const shortcutList = document.createElement('div')
+  
+  const friendlyNames = {
+    "toggleAlwaysOnTop": "Always on Top",
+    "toggleDoNotDisturb": "Do Not Disturb",
+    "toggleFocusMode": "Focus Mode",
+    "createPipWindow": "Picture-in-Picture",
+    "focusSearch": "Search",
+    "scheduleSendNow": "Send Scheduled",
+    "bossKey": "Boss Key (Chameleon)"
+  }
+
+  const renderShortcuts = () => {
+    shortcutList.innerHTML = ''
+    const currentShortcuts = config.shortcuts || {}
+    Object.entries(currentShortcuts).forEach(([action, accelerator]) => {
+      const row = document.createElement('div')
+      row.className = 'settings-row'
+      
+      const label = document.createElement('div')
+      label.className = 'settings-label'
+      label.textContent = friendlyNames[action] || action
+      
+      const keyDisplay = document.createElement('button')
+      keyDisplay.className = 'settings-btn'
+      keyDisplay.textContent = accelerator || 'Not Set'
+      keyDisplay.style.fontFamily = 'Menlo, Monaco, monospace'
+      keyDisplay.style.minWidth = '80px'
+      
+      keyDisplay.onclick = () => {
+        keyDisplay.textContent = 'Recording...'
+        keyDisplay.classList.add('primary')
+        
+        const handler = (e) => {
+          e.preventDefault()
+          if (e.key === 'Escape') {
+             keyDisplay.textContent = accelerator
+             keyDisplay.classList.remove('primary')
+             document.removeEventListener('keydown', handler)
+             return
+          }
+          
+          let keys = []
+          if (e.metaKey) keys.push('CmdOrCtrl')
+          if (e.ctrlKey && !e.metaKey) keys.push('CmdOrCtrl') // map Win Ctrl to same
+          if (e.altKey) keys.push('Alt')
+          if (e.shiftKey) keys.push('Shift')
+          
+          // ignore standalone modifiers
+          if (['Meta','Control','Alt','Shift'].includes(e.key)) return
+          
+          let char = e.key.toUpperCase()
+          // basic mapping for electron accelerator
+          if (char === ' ') char = 'Space'
+          if (char === 'ENTER') char = 'Enter'
+          if (char === 'ARROWUP') char = 'Up'
+          if (char === 'ARROWDOWN') char = 'Down'
+          
+          keys.push(char)
+          const newAccelerator = keys.join('+')
+          
+          ipcRenderer.send('update-shortcut', { action, accelerator: newAccelerator })
+          
+          // Optimistically update
+          config.shortcuts[action] = newAccelerator
+          renderShortcuts()
+          
+          document.removeEventListener('keydown', handler)
+        }
+        document.addEventListener('keydown', handler)
+      }
+      
+      row.append(label, keyDisplay)
+      shortcutList.append(row)
+    })
+  }
+  
+  renderShortcuts()
+  shortcutSection.append(shortcutList)
+
+  scrollArea.append(privacySection, appearanceSection, systemSection, shortcutSection)
 
   const footer = document.createElement('div')
   footer.className = 'close-area'
@@ -374,6 +762,9 @@ function showSettingsModal(config) {
   overlay.appendChild(modal)
   document.body.appendChild(overlay)
   
+  // Update theme once everything is created to ensure references (mainTitle etc) exist
+  updateTheme();
+
   overlay.onclick = (e) => { 
     if (e.target === overlay) {
       mediaQuery.removeEventListener('change', updateTheme);
@@ -417,6 +808,10 @@ function applyVisibilityOverride() {
         enumerable: visDesc ? visDesc.enumerable : true,
         get() { return 'hidden'; }
       });
+      
+      // Also force hasFocus to false to kill typing indicators that ignore visibility
+      const originalHasFocus = document.hasFocus;
+      document.hasFocus = function() { return false; };
 
       // block visibilitychange events generated by the page
       const blockEvent = (e) => { e.stopImmediatePropagation(); };
@@ -425,6 +820,7 @@ function applyVisibilityOverride() {
       window.__restoreVisibilityOverride = function restoreVisibilityOverride() {
         if (originals.hidden) Object.defineProperty(document, 'hidden', originals.hidden);
         if (originals.visibilityState) Object.defineProperty(document, 'visibilityState', originals.visibilityState);
+        if (originalHasFocus) document.hasFocus = originalHasFocus;
         document.removeEventListener('visibilitychange', blockEvent, true);
         delete window.__restoreVisibilityOverride;
         document.__visibilityOverrideInstalled = false;
@@ -649,16 +1045,19 @@ function setupBackgroundDetection() {
 let customStyleElement = null;
 
 function applyCustomCSS(css) {
+  const target = document.head || document.documentElement;
+  if (!target) {
+    // defer if DOM not ready
+    setTimeout(() => applyCustomCSS(css), 100);
+    return;
+  }
+
   if (!customStyleElement) {
     customStyleElement = document.createElement('style');
     customStyleElement.id = 'unleashed-custom-css';
-    document.head.appendChild(customStyleElement);
+    target.appendChild(customStyleElement);
   }
   
-  // Wrap CSS to respect Messenger's custom backgrounds
-  // We prepend a selector that only applies if body doesn't have the custom-bg class
-  // Note: This is a bit naive, but it works for simple overrides.
-  // A better way is to provide the user with the class and let them use it.
   customStyleElement.textContent = css;
 }
 
@@ -672,4 +1071,202 @@ window.addEventListener('DOMContentLoaded', () => {
   setupClipboardSanitizer()
   setupKeywordAlerts()
   setupBackgroundDetection()
+  setupInvisibleInk() // Steganography
+  setInterval(scrapeActiveChat, 2000)
 })
+
+function scrapeActiveChat() {
+  const activeLink = document.querySelector('div[role="navigation"] a[aria-current="page"]') ||
+                     document.querySelector('div[aria-label="Chats"] a[aria-current="page"]');
+  if (!activeLink) return;
+
+  // Try to find avatar image
+  const img = activeLink.querySelector('img') || 
+              activeLink.querySelector('svg mask image');
+  
+  if (!img) return;
+
+  const src = img.src || img.getAttribute('xlink:href');
+  if (!src) return;
+
+  ipcRenderer.send('update-active-chat', { src });
+}
+
+// --- Invisible Ink (Steganography) ---
+const INVISIBLE_ZERO = '\u200B'
+const INVISIBLE_ONE = '\u200C'
+const INVISIBLE_SPLIT = '\u200D'
+
+function asciiToBinary(str) {
+  return str.split('').map(char => {
+    return char.charCodeAt(0).toString(2).padStart(8, '0')
+  }).join('')
+}
+
+function binaryToAscii(bin) {
+  return bin.match(/.{1,8}/g).map(byte => {
+    return String.fromCharCode(parseInt(byte, 2))
+  }).join('')
+}
+
+function encodeInvisible(text) {
+  const binary = asciiToBinary(text)
+  return INVISIBLE_SPLIT + binary.split('').map(b => b === '0' ? INVISIBLE_ZERO : INVISIBLE_ONE).join('') + INVISIBLE_SPLIT
+}
+
+function decodeInvisible(text) {
+  // Extract invisible invisible sequence
+  const pattern = new RegExp(`${INVISIBLE_SPLIT}([${INVISIBLE_ZERO}${INVISIBLE_ONE}]+)${INVISIBLE_SPLIT}`)
+  const match = text.match(pattern)
+  if (!match) return null
+  
+  const binary = match[1].split('').map(c => c === INVISIBLE_ZERO ? '0' : '1').join('')
+  return binaryToAscii(binary)
+}
+
+function setupInvisibleInk() {
+  let isInvisibleMode = false
+  const innocentPhrases = [
+    "Sounds good to me.", "I'll check it out.", "Okay, let me know.", 
+    "Just finishing up here.", "That's interesting.", "Can we talk later?",
+    "Hey, what's up?", "Got it.", "No worries.", "See you soon.",
+    "Thanks for the update.", "I agree.", "On my way."
+  ]
+
+  // UI Injection
+  const injectToggle = () => {
+    const actions = document.querySelector('div[aria-label="Message actions"]') || 
+                    document.querySelector('div[aria-label="Conversation actions"]')
+    
+    // Look for the input area container to attach
+    const inputArea = document.querySelector('div[role="textbox"]') || 
+                      document.querySelector('div[contenteditable="true"]') ||
+                      document.querySelector('div[aria-label="Message"]')
+                      
+    if (!inputArea) return
+
+    if (document.getElementById('invisible-ink-toggle')) return
+
+    const btn = document.createElement('div')
+    btn.id = 'invisible-ink-toggle'
+    btn.innerHTML = ICONS.lock
+    btn.title = "Invisible Ink Mode"
+    btn.style.cssText = `
+      position: absolute; bottom: 100%; right: 20px;
+      width: 40px; height: 40px; background: rgba(0,0,0,0.5);
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; z-index: 100; margin-bottom: 5px;
+      font-size: 16px; transition: all 0.2s;
+      color: white;
+    `
+    btn.onclick = () => {
+      isInvisibleMode = !isInvisibleMode
+      const input = document.querySelector('div[role="textbox"]')
+      
+      if (isInvisibleMode) {
+        btn.style.background = '#0084ff'
+        btn.innerHTML = ICONS.ghost
+        if (input) {
+            input.setAttribute('data-placeholder-original', input.getAttribute('aria-label') || '')
+            // visual feedback
+            input.style.border = '2px solid #0084ff'
+        }
+      } else {
+        btn.style.background = 'rgba(0,0,0,0.5)'
+        btn.innerHTML = ICONS.lock
+        if (input) input.style.border = 'none'
+      }
+    }
+    
+    // Attach near input
+    const container = inputArea.closest('div[role="none"]') || inputArea.parentElement
+    if (container) {
+        container.style.position = 'relative'
+        container.appendChild(btn)
+    }
+  }
+
+  // Poll for UI
+  setInterval(injectToggle, 2000)
+
+  // Intercept Sending
+  document.addEventListener('keydown', (e) => {
+    if (!isInvisibleMode) return
+    if (e.key === 'Enter' && !e.shiftKey) {
+        const input = document.querySelector('div[role="textbox"]')
+        if (!input) return
+        
+        const secret = input.innerText.trim()
+        if (!secret) return
+        
+        e.preventDefault()
+        e.stopPropagation()
+        
+        // Encode
+        const innocent = innocentPhrases[Math.floor(Math.random() * innocentPhrases.length)]
+        const payload = innocent + ' ' + encodeInvisible(secret)
+        
+        // Replace and Send
+        
+        // Using strict execCommand for Messenger compatibility
+        document.execCommand('selectAll', false, null)
+        document.execCommand('insertText', false, payload)
+        
+        // Let React state catch up then dispatch enter
+        setTimeout(() => {
+            const enter = new KeyboardEvent('keydown', {
+                bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13
+            })
+            input.dispatchEvent(enter)
+        }, 50)
+        
+        // Reset (optional, React usually clears it)
+        isInvisibleMode = false
+        const btn = document.getElementById('invisible-ink-toggle')
+        if (btn) {
+            btn.style.background = 'rgba(0,0,0,0.5)'
+            btn.innerHTML = ICONS.lock
+            input.style.border = 'none'
+        }
+    }
+  }, true)
+
+  // Decoder Observer
+  const decodeObserver = new MutationObserver((mutations) => {
+    document.querySelectorAll('div[dir="auto"]').forEach(el => {
+        if (el.dataset.scanned) return
+        const text = el.innerText
+        if (text && text.includes(INVISIBLE_SPLIT)) {
+            const secret = decodeInvisible(text)
+            if (secret) {
+                el.innerText = '' // clear
+                
+                const lock = document.createElement('span')
+                lock.innerHTML = ICONS.lock + ' '
+                lock.style.verticalAlign = 'middle'
+                lock.style.marginRight = '4px'
+                
+                const secretSpan = document.createElement('span')
+                secretSpan.textContent = secret
+                secretSpan.style.color = '#ff4400'
+                secretSpan.style.fontWeight = 'bold'
+                secretSpan.style.backgroundColor = 'rgba(255,255,0,0.1)'
+                secretSpan.style.padding = '2px 4px'
+                secretSpan.style.borderRadius = '4px'
+
+                const originalSpan = document.createElement('span')
+                originalSpan.textContent = ` (${text.replace(INVISIBLE_SPLIT, '').substring(0, 10)}...)`
+                originalSpan.style.fontSize = '10px'
+                originalSpan.style.opacity = '0.5'
+                
+                el.appendChild(lock)
+                el.appendChild(secretSpan)
+                el.appendChild(originalSpan)
+                el.dataset.scanned = 'true'
+            }
+        }
+    })
+  })
+  
+  decodeObserver.observe(document.body, { childList: true, subtree: true, characterData: true })
+}

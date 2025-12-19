@@ -14,6 +14,23 @@ const fs = require("fs");
 const { net } = require("electron");
 const Store = require("electron-store");
 
+app.isQuiting = false;
+app.setName("Messenger Unleashed");
+
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (event, commandLine, workingDirectory) => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 const store = new Store({
   defaults: {
     alwaysOnTop: false,
@@ -29,18 +46,33 @@ const store = new Store({
     ],
     menuBarMode: false,
     blockReadReceipts: false,
+    blockActiveStatus: false,
     spellCheck: true,
     keywordAlerts: ["urgent", "asap"],
     keywordAlertsEnabled: true,
     clipboardSanitize: true,
     scheduleDelayMs: 30000,
     blockTypingIndicator: false,
+    expTypingOverlay: false,
     windowOpacity: 1.0,
     customCSS: "",
     modernLook: false,
     floatingGlass: false,
+    shortcuts: {
+      "toggleAlwaysOnTop": "CmdOrCtrl+Shift+T",
+      "toggleDoNotDisturb": "CmdOrCtrl+Shift+D",
+      "toggleFocusMode": "CmdOrCtrl+Shift+F",
+      "createPipWindow": "CmdOrCtrl+Shift+P",
+      "focusSearch": "CmdOrCtrl+K",
+      "scheduleSendNow": "CmdOrCtrl+Alt+Enter",
+      "bossKey": "CmdOrCtrl+Shift+B"
+    }
   },
 });
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId(app.name);
+}
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -76,6 +108,67 @@ function getRequestBody(details) {
   }
 }
 
+function parseGraphqlBody(body) {
+  const result = {
+    friendlyName: "",
+    docId: "",
+    variablesText: "",
+    rawText: body || "",
+  };
+
+  if (!body || typeof body !== "string") return result;
+
+  const trimmed = body.trim();
+  const tryJSON = (value) => {
+    try {
+      return JSON.parse(value);
+    } catch (_) {
+      return null;
+    }
+  };
+
+  if (trimmed.startsWith("{")) {
+    const parsed = tryJSON(trimmed);
+    if (parsed && typeof parsed === "object") {
+      result.friendlyName = parsed.fb_api_req_friendly_name || parsed.friendly_name || "";
+      result.docId = parsed.doc_id || parsed.document_id || "";
+      if (parsed.variables) {
+        result.variablesText = JSON.stringify(parsed.variables);
+      }
+      return result;
+    }
+  }
+
+  try {
+    const params = new URLSearchParams(body);
+    result.friendlyName =
+      params.get("fb_api_req_friendly_name") ||
+      params.get("friendly_name") ||
+      "";
+    result.docId = params.get("doc_id") || params.get("document_id") || "";
+
+    const variablesRaw = params.get("variables");
+    if (variablesRaw) {
+      const parsedVars = tryJSON(variablesRaw);
+      result.variablesText = parsedVars
+        ? JSON.stringify(parsedVars)
+        : variablesRaw;
+    } else {
+      const queriesRaw = params.get("queries");
+      if (queriesRaw) {
+        const parsedQueries = tryJSON(queriesRaw);
+        result.variablesText = parsedQueries
+          ? JSON.stringify(parsedQueries)
+          : queriesRaw;
+      }
+    }
+  } catch (_) {
+    // ignore parse failures
+  }
+
+  return result;
+}
+
 function isTypingIndicatorPayload(body) {
   if (!body || typeof body !== "string") return false;
 
@@ -109,24 +202,22 @@ function isTypingIndicatorPayload(body) {
   }
 
   // raw JSON (GraphQL or REST)
+  // Aggressively search for typing keywords in the raw body string
+  // This covers JSON, URL-encoded, and multipart bodies
+  const rawBody = body.toString();
+  if (
+    rawBody.includes("SendTypingIndicator") ||
+    rawBody.includes("typing_indicator") ||
+    rawBody.includes("typing") && (rawBody.includes("true") || rawBody.includes("1")) // stricter check for generic "typing"
+  ) {
+    return true;
+  }
+  
+  // Keep the structured checks just in case
   const json = tryJSON(body);
   if (json) {
-    if (Array.isArray(json)) {
-      if (
-        json.some(
-          (item) =>
-            item?.variables?.is_typing === true ||
-            item?.variables?.typing === true
-        )
-      )
-        return true;
-    } else if (
-      json.variables?.is_typing === true ||
-      json.is_typing === true ||
-      json.typing === true
-    ) {
-      return true;
-    }
+    if (json.name === "SendTypingIndicator" || json.mutation?.includes("SendTypingIndicator")) return true;
+    if (json.variables?.is_typing === true || json.variables?.typing === true) return true;
   }
 
   return false;
@@ -149,6 +240,9 @@ const TYPING_URL_PATTERNS = [
   /\/ajax\/mercury\/send_message_typing\.php/i,
   /\/webgraphql\/mutation.*SendTypingIndicator/i,
   /\/graphql.*typing/i,
+  /typing_indicator/i,
+  /presence.*typing/i,
+  /st=1/i, // common field for typing state in some AJAX calls
   /-edge-chat\.facebook\.com/i,
   /-edge-chat\.messenger\.com/i,
 ];
@@ -194,13 +288,19 @@ function shouldBlockTyping(url, body) {
 function updateRequestBlocker() {
   const blockReadReceipts = store.get("blockReadReceipts");
   const blockTypingIndicator = store.get("blockTypingIndicator");
+  const expTypingOverlay = store.get("expTypingOverlay");
   
   const filter = {
     urls: [
       "https://*.messenger.com/*",
       "https://*.facebook.com/*",
-      "https://*-edge-chat.facebook.com/*",
-      "https://*-edge-chat.messenger.com/*",
+      "https://edge-chat.messenger.com/*",
+      "https://edge-chat.facebook.com/*",
+      "wss://*.messenger.com/*",
+      "wss://*.facebook.com/*",
+      "wss://edge-chat.messenger.com/*",
+      "wss://edge-chat.facebook.com/*",
+      "http://localhost:3103/*",
     ],
   };
 
@@ -218,23 +318,179 @@ function updateRequestBlocker() {
       const url = details.url || "";
       const body = details.method === "POST" ? getRequestBody(details) : "";
       
+      // Silently block local probes from Facebook scripts
+      if (url.includes("localhost:3103")) {
+         return callback({ cancel: true });
+      }
+      
       // Check read receipts blocking
       if (blockReadReceipts && shouldBlockReadReceipt(url, body)) {
-        console.log("[Unleashed] Blocked read receipt:", url.slice(0, 100));
+        console.log(`\x1b[31m[Unleashed] [BLOCKED] READ RECEIPT:\x1b[0m ${url.slice(0, 150)}`);
         return callback({ cancel: true });
       }
       
-      // Check typing indicator blocking
-      if (blockTypingIndicator && shouldBlockTyping(url, body)) {
-        console.log("[Unleashed] Blocked typing indicator:", url.slice(0, 100));
+      // Check typing indicator blocking (skip WebSockets; handled in preload)
+      if (blockTypingIndicator && details.resourceType !== "websocket" && shouldBlockTyping(url, body)) {
+        console.log(`\x1b[33m[Unleashed] [BLOCKED] TYPING INDICATOR:\x1b[0m ${url.slice(0, 150)}`);
         return callback({ cancel: true });
       }
       
+      // DEBUG: Log any active traffic to see what we missed
+      if (!url.includes("blocked_") && !url.includes("ping")) {
+         if (url.includes("graphql")) {
+            // console.log(`\x1b[36m[Unleashed] [GraphQL] ${url} | Body len: ${body.length}\x1b[0m`);
+            if (body.includes("typing")) console.log(`\x1b[35m[Unleashed] [MISSED TYPING] In GraphQL: ${url}\x1b[0m`);
+         }
+         else if (url.includes("bnzai") || url.includes("typing")) {
+            // console.log(`\x1b[90m[Unleashed] [Banzai/Typing] ${url.slice(0, 100)}\x1b[0m`);
+         }
+      }
+
       return callback({});
     };
     
+    console.log(`\x1b[35m[Unleashed] [BLOCKER] Active | Read: ${blockReadReceipts} | Typing: ${blockTypingIndicator}\x1b[0m`);
     session.defaultSession.webRequest.onBeforeRequest(filter, requestBlockerHandler);
   }
+}
+
+function getAllFramesForWebContents(contents) {
+  if (!contents || contents.isDestroyed()) return [];
+  const mainFrame = contents.mainFrame;
+  if (!mainFrame) return [];
+  return Array.isArray(mainFrame.framesInSubtree)
+    ? mainFrame.framesInSubtree
+    : [mainFrame];
+}
+
+function buildWebSocketProxyInstallScript() {
+  return `
+    (() => {
+      if (!window || window.__unleashedWsProxyInstalled || !window.WebSocket) return;
+      window.__unleashedWsProxyInstalled = true;
+
+      const OriginalWebSocket = window.WebSocket;
+      const decoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8') : null;
+      const decodePayload = (data) => {
+        if (!data) return '';
+        if (typeof data === 'string') return data;
+        try {
+          if (data instanceof ArrayBuffer) {
+            const bytes = new Uint8Array(data);
+            return decoder ? decoder.decode(bytes) : '';
+          }
+          if (ArrayBuffer.isView(data)) {
+            const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+            return decoder ? decoder.decode(bytes) : '';
+          }
+        } catch (_) {}
+        return '';
+      };
+      const shouldBlockTypingPayload = (text) => {
+        if (!text) return false;
+        return text.toLowerCase().includes('is_typing');
+      };
+      const shouldBlockActiveStatusPayload = (text) => {
+        if (!text) return false;
+        if (text.includes('USER_ACTIVITY_UPDATE_SUBSCRIBE')) return true;
+        if (text.includes('USER_ACTIVITY_UPDATE')) return true;
+        const lower = text.toLowerCase();
+        if (lower.includes('presence') && lower.includes('active')) return true;
+        if (lower.includes('active_status')) return true;
+        return false;
+      };
+
+      function WebSocketProxy(url, protocols) {
+        const ws = protocols ? new OriginalWebSocket(url, protocols) : new OriginalWebSocket(url);
+        const originalSend = ws.send;
+
+        ws.send = function (data) {
+          const blockTypingIndicator = !!window.__unleashedBlockTypingIndicator;
+          const blockActiveStatus = !!window.__unleashedBlockActiveStatus;
+          const debugWebSocketBlocker = !!window.__unleashedDebugWsBlocker;
+          const debugWebSocketBlockerDecode = !!window.__unleashedDebugWsBlockerDecode;
+          const debugWebSocketTypingTrace = !!window.__unleashedDebugWsTypingTrace;
+
+          if (blockTypingIndicator || blockActiveStatus || debugWebSocketTypingTrace) {
+            const decoded = decodePayload(data);
+            if (decoded) {
+              const isTypingPayload = shouldBlockTypingPayload(decoded);
+              const blockTyping = blockTypingIndicator && isTypingPayload;
+              const blockActive = blockActiveStatus && shouldBlockActiveStatusPayload(decoded);
+
+              if (debugWebSocketTypingTrace && isTypingPayload) {
+                let preview = '';
+                if (debugWebSocketBlockerDecode) {
+                  preview = ' payload=' + decoded.slice(0, 220);
+                }
+                console.log('[Unleashed] [WS-TYPING] ' + url + ' blocked=' + blockTypingIndicator + preview);
+              }
+
+              if (blockTyping || blockActive) {
+                if (debugWebSocketBlocker) {
+                  const reason = blockTyping ? 'typing' : 'active-status';
+                  let preview = '';
+                  if (debugWebSocketBlockerDecode) {
+                    preview = ' payload=' + decoded.slice(0, 220);
+                  }
+                  console.log('[Unleashed] [WS-BLOCKED] ' + reason + ' ' + url + preview);
+                }
+                return;
+              }
+            }
+          }
+          return originalSend.call(ws, data);
+        };
+
+        return ws;
+      }
+
+      WebSocketProxy.prototype = OriginalWebSocket.prototype;
+      WebSocketProxy.CONNECTING = OriginalWebSocket.CONNECTING;
+      WebSocketProxy.OPEN = OriginalWebSocket.OPEN;
+      WebSocketProxy.CLOSING = OriginalWebSocket.CLOSING;
+      WebSocketProxy.CLOSED = OriginalWebSocket.CLOSED;
+
+      window.WebSocket = WebSocketProxy;
+    })();
+  `;
+}
+
+function syncWebSocketProxyFlags() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const blockTypingIndicator = !!store.get("blockTypingIndicator");
+  const blockActiveStatus = !!store.get("blockActiveStatus");
+  const debugWebSocketBlocker =
+    process.env.DEBUG_REQUEST_BLOCKER_WS === "1" ||
+    process.env.DEBUG_REQUEST_BLOCKER_WS_ALL === "1" ||
+    process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === "1";
+  const debugWebSocketBlockerDecode = process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === "1";
+  const debugWebSocketTypingTrace = process.env.DEBUG_REQUEST_BLOCKER_WS_TRACE_TYPING === "1";
+
+  const script = `
+    (() => {
+      window.__unleashedBlockTypingIndicator = ${blockTypingIndicator ? "true" : "false"};
+      window.__unleashedBlockActiveStatus = ${blockActiveStatus ? "true" : "false"};
+      window.__unleashedDebugWsBlocker = ${debugWebSocketBlocker ? "true" : "false"};
+      window.__unleashedDebugWsBlockerDecode = ${debugWebSocketBlockerDecode ? "true" : "false"};
+      window.__unleashedDebugWsTypingTrace = ${debugWebSocketTypingTrace ? "true" : "false"};
+    })();
+  `;
+
+  for (const frame of getAllFramesForWebContents(mainWindow.webContents)) {
+    if (!frame || frame.detached) continue;
+    frame.executeJavaScript(script, true).catch(() => {});
+  }
+}
+
+function ensureWebSocketProxyInstalled() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const installScript = buildWebSocketProxyInstallScript();
+  for (const frame of getAllFramesForWebContents(mainWindow.webContents)) {
+    if (!frame || frame.detached) continue;
+    frame.executeJavaScript(installScript, true).catch(() => {});
+  }
+  syncWebSocketProxyFlags();
 }
 
 // Legacy function kept for compatibility, now delegates to unified handler
@@ -440,7 +696,8 @@ function applyTheme(theme) {
   store.set("theme", theme);
   updateMenu();
 
-  mainWindow.webContents.reloadIgnoringCache();
+  // Instant apply instead of full reload
+  applyThemeCSS(theme);
 }
 
 function toggleAlwaysOnTop() {
@@ -793,6 +1050,16 @@ function toggleBlockTypingIndicator() {
   updateMenu();
 }
 
+function toggleExpTypingOverlay() {
+  const current = store.get("expTypingOverlay");
+  const newValue = !current;
+  store.set("expTypingOverlay", newValue);
+
+  if (!mainWindow) return;
+  mainWindow.webContents.send("set-exp-typing-overlay", newValue);
+  updateMenu();
+}
+
 function setWindowOpacity(opacity) {
   store.set("windowOpacity", opacity);
   if (mainWindow) {
@@ -915,11 +1182,25 @@ async function checkForUpdates() {
         const normalize = (v) => v.replace(/^v/, "");
         const normalizedLatest = normalize(latestVersion);
         const normalizedCurrent = normalize(CURRENT_VERSION);
+        
+        // robust semver check
+        const isNewer = (v1, v2) => {
+          const p1 = v1.split('.').map(Number);
+          const p2 = v2.split('.').map(Number);
+          for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
+            const n1 = p1[i] || 0;
+            const n2 = p2[i] || 0;
+            if (n1 > n2) return true;
+            if (n1 < n2) return false;
+          }
+          return false;
+        };
 
         if (
           latestVersion &&
           normalizedLatest !== normalizedCurrent &&
-          !latestVersion.startsWith("<!DOCTYPE")
+          !latestVersion.startsWith("<!DOCTYPE") &&
+          isNewer(normalizedLatest, normalizedCurrent)
         ) {
           dialog
             .showMessageBox(mainWindow, {
@@ -1162,6 +1443,11 @@ function applyModernLook() {
     mainWindow.webContents
       .insertCSS(modernCSS, { cssKey: "modern-look" })
       .catch(() => {});
+  } else {
+    // If we're not also in glass mode, restore the current theme colors
+    if (!store.get("floatingGlass")) {
+      applyThemeCSS(store.get("theme"));
+    }
   }
 }
 
@@ -1286,8 +1572,7 @@ function applyFloatingGlass() {
     applyThemeCSS("default");
   } else {
     // Restore normal theme settings
-    const currentTheme = store.get("theme");
-    applyThemeCSS(currentTheme);
+    applyThemeCSS(store.get("theme"));
   }
 }
 
@@ -1297,8 +1582,12 @@ function openSettingsUI() {
   
   // Send the full config so the Settings UI knows what's enabled
   const fullConfig = {
+    version: app.getVersion(),
+    shortcuts: store.get("shortcuts"),
     blockReadReceipts: store.get("blockReadReceipts"),
+    blockActiveStatus: store.get("blockActiveStatus"),
     blockTypingIndicator: store.get("blockTypingIndicator"),
+    expTypingOverlay: store.get("expTypingOverlay"),
     clipboardSanitize: store.get("clipboardSanitize"),
     keywordAlertsEnabled: store.get("keywordAlertsEnabled"),
     modernLook: store.get("modernLook"),
@@ -1322,12 +1611,21 @@ ipcMain.on("update-setting", (event, { key, value }) => {
   // Handle specific side effects
   switch (key) {
     case "blockReadReceipts":
+      store.set("blockReadReceipts", value);
       updateRequestBlocker();
       mainWindow.webContents.send("set-block-read-receipts", value);
+      break;
+    case "blockActiveStatus":
+      mainWindow.webContents.send("set-block-active-status", value);
+      syncWebSocketProxyFlags();
       break;
     case "blockTypingIndicator":
       updateRequestBlocker();
       mainWindow.webContents.send("set-block-typing-indicator", value);
+      syncWebSocketProxyFlags();
+      break;
+    case "expTypingOverlay":
+      mainWindow.webContents.send("set-exp-typing-overlay", value);
       break;
     case "clipboardSanitize":
       mainWindow.webContents.send("update-config", { clipboardSanitize: value });
@@ -1377,6 +1675,30 @@ ipcMain.on("css-input-result", (event, css) => {
   updateMenu();
 });
 
+ipcMain.on("update-shortcut", (event, { action, accelerator }) => {
+  const shortcuts = store.get("shortcuts") || {};
+  shortcuts[action] = accelerator;
+  store.set("shortcuts", shortcuts);
+  registerGlobalShortcuts();
+  mainWindow.webContents.send("update-config", { shortcuts });
+});
+
+ipcMain.on("toggle-chameleon", () => {
+  toggleChameleonMode();
+});
+
+let chameleonMode = false;
+function toggleChameleonMode() {
+  chameleonMode = !chameleonMode;
+  if (!mainWindow) return;
+  mainWindow.webContents.send("set-chameleon-mode", chameleonMode);
+  if (chameleonMode) {
+    if (process.platform === "darwin" && app.dock) app.dock.setBadge("");
+  } else {
+    updateUnreadBadge(unreadCount);
+  }
+}
+
 function applyCustomCSS() {
   if (!mainWindow) return;
   const css = store.get("customCSS");
@@ -1411,7 +1733,7 @@ async function exportCookies() {
     const allCookies = [...cookies, ...facebookCookies];
 
     fs.writeFileSync(filePath, JSON.stringify(allCookies, null, 2));
-    dialog.showMessageBox(mainWindow, {
+  dialog.showMessageBox(mainWindow, {
       type: "info",
       title: "Export Complete",
       message: `Exported ${allCookies.length} cookies`,
@@ -1419,6 +1741,82 @@ async function exportCookies() {
   } catch (err) {
     dialog.showErrorBox("Export Failed", err.message);
   }
+}
+
+// --- Chat Head Logic ---
+let chatHeadWindow = null;
+let activeChatInfo = null;
+
+ipcMain.on("update-active-chat", (event, info) => {
+  activeChatInfo = info;
+  if (chatHeadWindow && !chatHeadWindow.isDestroyed()) {
+     chatHeadWindow.webContents.send('update-head', info);
+  }
+});
+
+ipcMain.on("chat-head-clicked", () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  if (chatHeadWindow) chatHeadWindow.hide();
+});
+
+function createChatHead() {
+  if (chatHeadWindow && !chatHeadWindow.isDestroyed()) {
+    chatHeadWindow.show();
+    chatHeadWindow.webContents.send('update-head', activeChatInfo);
+    return;
+  }
+
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width } = primaryDisplay.workAreaSize;
+
+  chatHeadWindow = new BrowserWindow({
+    width: 70,
+    height: 70,
+    x: width - 90,
+    y: 100,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    hasShadow: false,
+    skipTaskbar: true,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+
+  const html = `
+    <html>
+      <body style="margin:0; padding:5px; overflow:hidden; background:transparent; -webkit-app-region: drag;">
+        <div id="avatar" style="width:54px; height:54px; border-radius:50%; background-color:#333; background-size:cover; background-position:center; border:3px solid #0084ff; box-shadow: 0 4px 12px rgba(0,0,0,0.5); cursor:pointer; transition: transform 0.1s;"></div>
+        <script>
+          const { ipcRenderer } = require('electron');
+          const avatar = document.getElementById('avatar');
+          avatar.onclick = () => ipcRenderer.send('chat-head-clicked');
+          avatar.onmouseenter = () => avatar.style.transform = 'scale(1.1)';
+          avatar.onmouseleave = () => avatar.style.transform = 'scale(1.0)';
+          
+          ipcRenderer.on('update-head', (_, info) => {
+             if (info.src) avatar.style.backgroundImage = 'url(' + info.src + ')';
+          });
+        </script>
+      </body>
+    </html>
+  `;
+
+  chatHeadWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  
+  chatHeadWindow.webContents.on('did-finish-load', () => {
+     if (activeChatInfo) {
+        chatHeadWindow.webContents.send('update-head', activeChatInfo);
+     }
+  });
 }
 
 async function importCookies() {
@@ -1551,6 +1949,7 @@ function updateMenu() {
   const clipboardSanitize = store.get("clipboardSanitize");
   const keywordAlertsEnabled = store.get("keywordAlertsEnabled");
   const blockTypingIndicator = store.get("blockTypingIndicator");
+  const expTypingOverlay = store.get("expTypingOverlay");
   const windowOpacity = store.get("windowOpacity");
   const customCSS = store.get("customCSS");
 
@@ -1616,6 +2015,12 @@ function updateMenu() {
               type: "checkbox",
               checked: blockTypingIndicator,
               click: toggleBlockTypingIndicator,
+            },
+            {
+              label: "[EXP] Typing Overlay (Better Typing Block)",
+              type: "checkbox",
+              checked: expTypingOverlay,
+              click: toggleExpTypingOverlay,
             },
             { type: "separator" },
             {
@@ -1947,6 +2352,9 @@ function updateMenu() {
 
 function createWindow() {
   const bounds = store.get("windowBounds");
+  const debugWebSocketFrames = process.env.DEBUG_REQUEST_BLOCKER_WS === "1";
+  const debugWebSocketFramesAll = process.env.DEBUG_REQUEST_BLOCKER_WS_ALL === "1";
+  const debugWebSocketFramesDecode = process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === "1";
 
   mainWindow = new BrowserWindow({
     width: bounds.width,
@@ -1965,6 +2373,7 @@ function createWindow() {
 
   mainWindow.webContents.setUserAgent(USER_AGENT);
   mainWindow.webContents.setMaxListeners(20);
+  const webSocketUrls = new Map();
 
   const opacity = store.get("windowOpacity");
   if (opacity < 1.0) {
@@ -2001,6 +2410,63 @@ function createWindow() {
 
   // apply request blockers before loading content (read receipts + typing indicator)
   updateRequestBlocker();
+
+  if (debugWebSocketFrames || debugWebSocketFramesAll) {
+    try {
+      if (!mainWindow.webContents.debugger.isAttached()) {
+        mainWindow.webContents.debugger.attach("1.3");
+      }
+      mainWindow.webContents.debugger.sendCommand("Network.enable");
+      mainWindow.webContents.debugger.on("message", (event, method, params) => {
+        if (method === "Network.webSocketCreated" && params && params.requestId) {
+          webSocketUrls.set(params.requestId, params.url || "");
+          return;
+        }
+        if (method === "Network.webSocketClosed" && params && params.requestId) {
+          webSocketUrls.delete(params.requestId);
+          return;
+        }
+        if (method !== "Network.webSocketFrameSent" && method !== "Network.webSocketFrameReceived") return;
+
+        const response = params && params.response ? params.response : {};
+        const payload = typeof response.payloadData === "string" ? response.payloadData : "";
+        const opcode = response.opcode;
+        const isText = opcode === 1;
+        let decodedText = "";
+        if (!isText && debugWebSocketFramesDecode && payload) {
+          try {
+            const decoded = Buffer.from(payload, "base64").toString("utf8");
+            if (decoded && /[\x20-\x7E]/.test(decoded)) {
+              decodedText = decoded;
+            }
+          } catch (_) {}
+        }
+        const searchable = (isText ? payload : decodedText).toLowerCase();
+        const hasTyping = searchable.includes("typing");
+        const hasPresence = searchable.includes("presence");
+        const hasActive = searchable.includes("active");
+        const hasRead = searchable.includes("read");
+        const shouldLog =
+          debugWebSocketFramesAll || hasTyping || hasPresence || hasActive || hasRead;
+
+        if (shouldLog) {
+          const direction = method === "Network.webSocketFrameSent" ? "WS-SEND" : "WS-RECV";
+          const url = webSocketUrls.get(params.requestId) || "";
+          let preview = ` payloadLen=${payload.length}`;
+          if (isText && payload.length) {
+            preview = ` payload=${payload.slice(0, 300)}`;
+          } else if (decodedText) {
+            preview = ` payloadDecoded=${decodedText.slice(0, 300)}`;
+          }
+          console.log(
+            `[Unleashed] [${direction}]${url ? ` ${url}` : ""} opcode=${opcode} typing=${hasTyping} presence=${hasPresence} active=${hasActive} read=${hasRead}${preview}`
+          );
+        }
+      });
+    } catch (error) {
+      console.log(`[Unleashed] [WS-DEBUG] Failed to attach debugger: ${error.message}`);
+    }
+  }
 
   mainWindow.loadURL("https://www.messenger.com");
 
@@ -2039,14 +2505,52 @@ function createWindow() {
       "set-block-typing-indicator",
       store.get("blockTypingIndicator")
     );
+    mainWindow.webContents.send(
+      "set-exp-typing-overlay",
+      store.get("expTypingOverlay")
+    );
+
+    ensureWebSocketProxyInstalled();
 
     applyModernLook();
     applyFloatingGlass();
   });
 
+  mainWindow.webContents.on("did-frame-finish-load", () => {
+    ensureWebSocketProxyInstalled();
+  });
+
+  mainWindow.on("closed", () => {
+    try {
+      if (mainWindow && mainWindow.webContents && mainWindow.webContents.debugger.isAttached()) {
+        mainWindow.webContents.debugger.detach();
+      }
+    } catch (_) {}
+  });
+
+  mainWindow.on("minimize", () => {
+    if (activeChatInfo && activeChatInfo.src) {
+       createChatHead();
+    }
+  });
+
+  mainWindow.on("restore", () => {
+    if (chatHeadWindow) {
+      chatHeadWindow.hide();
+    }
+  });
+
   mainWindow.on("resize", () => {
     const { width, height } = mainWindow.getBounds();
     store.set("windowBounds", { width, height });
+  });
+
+  mainWindow.on("close", (event) => {
+    if (!app.isQuiting) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+    return false;
   });
 
   mainWindow.on("closed", () => {
@@ -2063,17 +2567,33 @@ function createWindow() {
   }
 
   updateMenu();
+
+  // Suppress Permissions Policy: unload violations
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    const responseHeaders = { ...details.responseHeaders };
+    responseHeaders["Permissions-Policy"] = ["unload=*"];
+    callback({ responseHeaders });
+  });
 }
 
 app.on("ready", () => {
-  const { globalShortcut } = require("electron");
+  registerGlobalShortcuts();
+});
 
-  globalShortcut.register("CmdOrCtrl+Shift+T", toggleAlwaysOnTop);
-  globalShortcut.register("CmdOrCtrl+Shift+D", toggleDoNotDisturb);
-  globalShortcut.register("CmdOrCtrl+Shift+F", toggleFocusMode);
-  globalShortcut.register("CmdOrCtrl+Shift+P", createPipWindow);
-  globalShortcut.register("CmdOrCtrl+K", focusSearch);
-  globalShortcut.register("CmdOrCtrl+Alt+Enter", scheduleSendNow);
+function registerGlobalShortcuts() {
+  const { globalShortcut } = require("electron");
+  globalShortcut.unregisterAll();
+
+  const shortcuts = store.get("shortcuts") || {};
+
+  if (shortcuts.toggleAlwaysOnTop) globalShortcut.register(shortcuts.toggleAlwaysOnTop, toggleAlwaysOnTop);
+  if (shortcuts.toggleDoNotDisturb) globalShortcut.register(shortcuts.toggleDoNotDisturb, toggleDoNotDisturb);
+  if (shortcuts.toggleFocusMode) globalShortcut.register(shortcuts.toggleFocusMode, toggleFocusMode);
+  if (shortcuts.createPipWindow) globalShortcut.register(shortcuts.createPipWindow, createPipWindow);
+  if (shortcuts.focusSearch) globalShortcut.register(shortcuts.focusSearch, focusSearch);
+  if (shortcuts.scheduleSendNow) globalShortcut.register(shortcuts.scheduleSendNow, scheduleSendNow);
+  
+  if (shortcuts.bossKey) globalShortcut.register(shortcuts.bossKey, toggleChameleonMode);
 
   globalShortcut.register("CmdOrCtrl+Up", () => navigateConversation("up"));
   globalShortcut.register("CmdOrCtrl+Down", () => navigateConversation("down"));
@@ -2084,7 +2604,7 @@ app.on("ready", () => {
       sendQuickReply(qr.text)
     );
   });
-});
+}
 
 app.whenReady().then(() => {
   const launchAtLogin = store.get("launchAtLogin");
@@ -2116,6 +2636,10 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", () => {
+  app.isQuiting = true;
 });
 
 app.on("will-quit", () => {
