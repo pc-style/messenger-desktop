@@ -146,17 +146,25 @@ function isTypingIndicatorPayload(body) {
         json.some(
           (item) =>
             item?.variables?.is_typing === true ||
-            item?.variables?.typing === true
+            item?.variables?.typing === true ||
+            item?.name === "SendTypingIndicator"
         )
       )
         return true;
     } else if (
       json.variables?.is_typing === true ||
       json.is_typing === true ||
-      json.typing === true
+      json.typing === true ||
+      json.name === "SendTypingIndicator" ||
+      json.mutation?.includes("SendTypingIndicator")
     ) {
       return true;
     }
+  }
+
+  // Fallback string check
+  if (body.includes("SendTypingIndicator") || body.includes("typing_state")) {
+    return true;
   }
 
   return false;
@@ -179,6 +187,9 @@ const TYPING_URL_PATTERNS = [
   /\/ajax\/mercury\/send_message_typing\.php/i,
   /\/webgraphql\/mutation.*SendTypingIndicator/i,
   /\/graphql.*typing/i,
+  /typing_indicator/i,
+  /presence.*typing/i,
+  /st=1/i, // common field for typing state in some AJAX calls
   /-edge-chat\.facebook\.com/i,
   /-edge-chat\.messenger\.com/i,
 ];
@@ -248,19 +259,20 @@ function updateRequestBlocker() {
       
       // Check read receipts blocking
       if (blockReadReceipts && shouldBlockReadReceipt(url, body)) {
-        console.log(`\x1b[31m[Unleashed] 🚫 BLOCKED READ RECEIPT:\x1b[0m ${url}`);
+        console.log(`\x1b[31m[Unleashed] [BLOCKED] READ RECEIPT:\x1b[0m ${url.slice(0, 150)}`);
         return callback({ cancel: true });
       }
       
       // Check typing indicator blocking
       if (blockTypingIndicator && shouldBlockTyping(url, body)) {
-        console.log(`\x1b[33m[Unleashed] 🚫 BLOCKED TYPING INDICATOR:\x1b[0m ${url}`);
+        console.log(`\x1b[33m[Unleashed] [BLOCKED] TYPING INDICATOR:\x1b[0m ${url.slice(0, 150)}`);
         return callback({ cancel: true });
       }
       
       return callback({});
     };
     
+    console.log(`\x1b[35m[Unleashed] [BLOCKER] Updated | Read: ${blockReadReceipts} | Typing: ${blockTypingIndicator}\x1b[0m`);
     session.defaultSession.webRequest.onBeforeRequest(filter, requestBlockerHandler);
   }
 }
@@ -1205,6 +1217,11 @@ function applyModernLook() {
     mainWindow.webContents
       .insertCSS(modernCSS, { cssKey: "modern-look" })
       .catch(() => {});
+  } else {
+    // If we're not also in glass mode, restore the current theme colors
+    if (!store.get("floatingGlass")) {
+      applyThemeCSS(store.get("theme"));
+    }
   }
 }
 
@@ -1329,8 +1346,7 @@ function applyFloatingGlass() {
     applyThemeCSS("default");
   } else {
     // Restore normal theme settings
-    const currentTheme = store.get("theme");
-    applyThemeCSS(currentTheme);
+    applyThemeCSS(store.get("theme"));
   }
 }
 

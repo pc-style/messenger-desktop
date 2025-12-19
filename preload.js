@@ -391,7 +391,7 @@ function showSettingsModal(config) {
   const privacySection = document.createElement('div')
   privacySection.className = 'settings-section'
   const privacyTitle = document.createElement('h4')
-  privacyTitle.textContent = 'Privacy & Stealth'
+  privacyTitle.innerHTML = `${ICONS.lock} Privacy & Stealth`
   privacySection.append(privacyTitle)
   privacySection.append(createToggleRow('Block Read Receipts', 'Others won\'t know when you read messages.', 'blockReadReceipts', config.blockReadReceipts))
   privacySection.append(createToggleRow('Block Active Status', 'Appear offline but still see others.', 'blockActiveStatus', config.blockActiveStatus))
@@ -402,7 +402,7 @@ function showSettingsModal(config) {
   const appearanceSection = document.createElement('div')
   appearanceSection.className = 'settings-section'
   const appearanceTitle = document.createElement('h4')
-  appearanceTitle.textContent = 'Appearance'
+  appearanceTitle.innerHTML = `${ICONS.ghost} Appearance`
   appearanceSection.append(appearanceTitle)
   appearanceSection.append(createToggleRow('Modern Look (Floating)', 'A lighter, floating UI design.', 'modernLook', config.modernLook))
   appearanceSection.append(createToggleRow('Floating Glass (Theme Override)', 'Premium glassmorphism aesthetics.', 'floatingGlass', config.floatingGlass))
@@ -433,8 +433,6 @@ function showSettingsModal(config) {
   systemSection.append(systemTitle)
   systemSection.append(createToggleRow('Always on Top', 'Keep Messenger above other windows.', 'alwaysOnTop', config.alwaysOnTop))
   systemSection.append(createToggleRow('Launch at Login', 'Start the app automatically.', 'launchAtLogin', config.launchAtLogin))
-  systemSection.append(createToggleRow('Spell Check', 'Check spelling as you type.', 'spellCheck', config.spellCheck))
-
   systemSection.append(createToggleRow('Spell Check', 'Check spelling as you type.', 'spellCheck', config.spellCheck))
 
   // Shortcuts Section
