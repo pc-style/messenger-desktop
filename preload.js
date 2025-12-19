@@ -257,7 +257,7 @@ function showSettingsModal(config) {
   mainTitle.style.cssText = `margin: 0; font-size: 20px; font-weight: 700; color: ${textColor};`
   
   const subTitle = document.createElement('div')
-  subTitle.textContent = 'v1.1.7 — Settings'
+  subTitle.textContent = 'v1.1.8 — Settings'
   subTitle.style.cssText = `font-size: 12px; color: ${subTextColor}; font-weight: 500; margin-top: 2px;`
   
   titleGroup.append(mainTitle, subTitle)
@@ -638,11 +638,12 @@ function setupBackgroundDetection() {
     }
   };
 
-  const observer = new MutationObserver(checkBackground);
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+  // Use polling instead of MutationObserver to avoid performance impact
+  // MutationObserver on document.body with getComputedStyle caused a freeze/OOM loop
+  setInterval(checkBackground, 2000);
   
   // Initial check
-  checkBackground();
+  setTimeout(checkBackground, 1000);
 }
 
 let customStyleElement = null;

@@ -11,8 +11,8 @@ const {
 } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const Store = require("electron-store");
 const { net } = require("electron");
+const Store = require("electron-store");
 
 const store = new Store({
   defaults: {
