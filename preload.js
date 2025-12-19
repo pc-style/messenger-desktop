@@ -11,6 +11,7 @@ let config = {
 }
 
 let blockReadReceipts = false
+let blockActiveStatus = false
 let blockTypingIndicator = false
 let visibilityPatched = false
 
@@ -46,12 +47,24 @@ ipcRenderer.on('update-config', (_, newConfig) => {
 
 ipcRenderer.on('set-block-read-receipts', (_, enabled) => {
   blockReadReceipts = enabled
-  if (enabled) {
+  updateVisibilityState()
+})
+
+ipcRenderer.on('set-block-active-status', (_, enabled) => {
+  blockActiveStatus = enabled
+  updateVisibilityState()
+})
+
+// Unified visibility logic
+function updateVisibilityState() {
+  // We force hidden if Active Status is blocked OR Read Receipts are blocked
+  // (Read receipts usually require visibility to trigger, so this is a safety net)
+  if (blockActiveStatus || blockReadReceipts) {
     applyVisibilityOverride()
   } else {
     restoreVisibilityOverride()
   }
-})
+}
 
 // typing indicator blocking now handled in main via webRequest; keep flag for potential UI reflection
 ipcRenderer.on('set-block-typing-indicator', (_, enabled) => {
@@ -318,7 +331,7 @@ function showSettingsModal(config) {
   mainTitle.style.cssText = `margin: 0; font-size: 20px; font-weight: 700; color: ${textColor};`
   
   const subTitle = document.createElement('div')
-  subTitle.textContent = 'v1.1.9 — Settings'
+  subTitle.textContent = 'v1.1.10 — Settings'
   subTitle.style.cssText = `font-size: 12px; color: ${subTextColor}; font-weight: 500; margin-top: 2px;`
   
   titleGroup.append(mainTitle, subTitle)
@@ -374,6 +387,7 @@ function showSettingsModal(config) {
   privacyTitle.textContent = 'Privacy & Stealth'
   privacySection.append(privacyTitle)
   privacySection.append(createToggleRow('Block Read Receipts', 'Others won\'t know when you read messages.', 'blockReadReceipts', config.blockReadReceipts))
+  privacySection.append(createToggleRow('Block Active Status', 'Appear offline but still see others.', 'blockActiveStatus', config.blockActiveStatus))
   privacySection.append(createToggleRow('Block Typing Indicator', 'Hide "typing..." while you compose.', 'blockTypingIndicator', config.blockTypingIndicator))
   privacySection.append(createToggleRow('Clipboard Sanitizer', 'Remove tracking data from pasted URLs.', 'clipboardSanitize', config.clipboardSanitize))
   

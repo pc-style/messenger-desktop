@@ -29,6 +29,7 @@ const store = new Store({
     ],
     menuBarMode: false,
     blockReadReceipts: false,
+    blockActiveStatus: false,
     spellCheck: true,
     keywordAlerts: ["urgent", "asap"],
     keywordAlertsEnabled: true,
@@ -928,11 +929,25 @@ async function checkForUpdates() {
         const normalize = (v) => v.replace(/^v/, "");
         const normalizedLatest = normalize(latestVersion);
         const normalizedCurrent = normalize(CURRENT_VERSION);
+        
+        // robust semver check
+        const isNewer = (v1, v2) => {
+          const p1 = v1.split('.').map(Number);
+          const p2 = v2.split('.').map(Number);
+          for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
+            const n1 = p1[i] || 0;
+            const n2 = p2[i] || 0;
+            if (n1 > n2) return true;
+            if (n1 < n2) return false;
+          }
+          return false;
+        };
 
         if (
           latestVersion &&
           normalizedLatest !== normalizedCurrent &&
-          !latestVersion.startsWith("<!DOCTYPE")
+          !latestVersion.startsWith("<!DOCTYPE") &&
+          isNewer(normalizedLatest, normalizedCurrent)
         ) {
           dialog
             .showMessageBox(mainWindow, {
@@ -1311,6 +1326,7 @@ function openSettingsUI() {
   // Send the full config so the Settings UI knows what's enabled
   const fullConfig = {
     blockReadReceipts: store.get("blockReadReceipts"),
+    blockActiveStatus: store.get("blockActiveStatus"),
     blockTypingIndicator: store.get("blockTypingIndicator"),
     clipboardSanitize: store.get("clipboardSanitize"),
     keywordAlertsEnabled: store.get("keywordAlertsEnabled"),
@@ -1335,8 +1351,12 @@ ipcMain.on("update-setting", (event, { key, value }) => {
   // Handle specific side effects
   switch (key) {
     case "blockReadReceipts":
+      store.set("blockReadReceipts", value);
       updateRequestBlocker();
       mainWindow.webContents.send("set-block-read-receipts", value);
+      break;
+    case "blockActiveStatus":
+      mainWindow.webContents.send("set-block-active-status", value);
       break;
     case "blockTypingIndicator":
       updateRequestBlocker();
@@ -2154,7 +2174,6 @@ function createWindow() {
     );
 
     applyModernLook();
-    applyFloatingGlass();
     applyFloatingGlass();
   });
 
