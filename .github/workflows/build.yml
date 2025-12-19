@@ -93,6 +93,7 @@ jobs:
           path: |
             dist/*.dmg
             dist/*.zip
+          compression-level: 0
 
   build-windows:
     needs: check-version
@@ -136,6 +137,7 @@ jobs:
           name: Messenger-Windows
           path: |
             dist/*.exe
+          compression-level: 0
 
   release:
     needs: [check-version, build-macos, build-windows]
