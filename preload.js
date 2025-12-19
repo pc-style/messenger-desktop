@@ -19,6 +19,7 @@ const debugWebSocketBlocker =
   process.env.DEBUG_REQUEST_BLOCKER_WS_ALL === '1' ||
   process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === '1'
 const debugWebSocketBlockerDecode = process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === '1'
+const debugWebSocketTypingTrace = process.env.DEBUG_REQUEST_BLOCKER_WS_TRACE_TYPING === '1'
 
 const textDecoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8') : null
 
@@ -65,11 +66,19 @@ function installWebSocketInterceptor() {
     const originalSend = ws.send
 
     ws.send = function (data) {
-      if (blockTypingIndicator || blockActiveStatus) {
+      if (blockTypingIndicator || blockActiveStatus || debugWebSocketTypingTrace) {
         const decoded = decodeWebSocketPayload(data)
         if (decoded) {
-          const blockTyping = blockTypingIndicator && shouldBlockTypingPayload(decoded)
+          const isTypingPayload = shouldBlockTypingPayload(decoded)
+          const blockTyping = blockTypingIndicator && isTypingPayload
           const blockActive = blockActiveStatus && shouldBlockActiveStatusPayload(decoded)
+          if (debugWebSocketTypingTrace && isTypingPayload) {
+            let preview = ''
+            if (debugWebSocketBlockerDecode) {
+              preview = ` payload=${decoded.slice(0, 220)}`
+            }
+            console.log(`[Unleashed] [WS-TYPING] ${url} blocked=${blockTypingIndicator}${preview}`)
+          }
           if (blockTyping || blockActive) {
             if (debugWebSocketBlocker) {
               const reason = blockTyping ? 'typing' : 'active-status'

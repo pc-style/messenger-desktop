@@ -6,7 +6,7 @@
   "main": "main.js",
   "scripts": {
     "dev": "electron . --js-flags=\"--max-old-space-size=4096\"",
-    "debug": "DEBUG_REQUEST_BLOCKER=1 DEBUG_REQUEST_BLOCKER_GRAPHQL_ALL=1 DEBUG_REQUEST_BLOCKER_WS=1 DEBUG_REQUEST_BLOCKER_WS_DECODE=1 electron . --js-flags=\"--max-old-space-size=4096\"",
+    "debug": "DEBUG_REQUEST_BLOCKER=1 DEBUG_REQUEST_BLOCKER_GRAPHQL_ALL=1 DEBUG_REQUEST_BLOCKER_WS=1 DEBUG_REQUEST_BLOCKER_WS_DECODE=1 DEBUG_REQUEST_BLOCKER_WS_TRACE_TYPING=1 electron . --js-flags=\"--max-old-space-size=4096\"",
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
