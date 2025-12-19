@@ -1948,6 +1948,7 @@ function updateMenu() {
   const clipboardSanitize = store.get("clipboardSanitize");
   const keywordAlertsEnabled = store.get("keywordAlertsEnabled");
   const blockTypingIndicator = store.get("blockTypingIndicator");
+  const expTypingOverlay = store.get("expTypingOverlay");
   const windowOpacity = store.get("windowOpacity");
   const customCSS = store.get("customCSS");
 
