@@ -18,6 +18,7 @@ const debugWebSocketBlocker =
   process.env.DEBUG_REQUEST_BLOCKER_WS === '1' ||
   process.env.DEBUG_REQUEST_BLOCKER_WS_ALL === '1' ||
   process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === '1'
+const debugWebSocketBlockerDecode = process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === '1'
 
 const textDecoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8') : null
 
@@ -72,7 +73,11 @@ function installWebSocketInterceptor() {
           if (blockTyping || blockActive) {
             if (debugWebSocketBlocker) {
               const reason = blockTyping ? 'typing' : 'active-status'
-              console.log(`[Unleashed] [WS-BLOCKED] ${reason} ${url}`)
+              let preview = ''
+              if (debugWebSocketBlockerDecode && decoded) {
+                preview = ` payload=${decoded.slice(0, 220)}`
+              }
+              console.log(`[Unleashed] [WS-BLOCKED] ${reason} ${url}${preview}`)
             }
             return
           }
