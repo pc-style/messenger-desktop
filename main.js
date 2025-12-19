@@ -14,6 +14,22 @@ const fs = require("fs");
 const { net } = require("electron");
 const Store = require("electron-store");
 
+app.isQuiting = false;
+
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (event, commandLine, workingDirectory) => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 const store = new Store({
   defaults: {
     alwaysOnTop: false,
@@ -2194,6 +2210,14 @@ function createWindow() {
     store.set("windowBounds", { width, height });
   });
 
+  mainWindow.on("close", (event) => {
+    if (!app.isQuiting) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+    return false;
+  });
+
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -2270,6 +2294,10 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", () => {
+  app.isQuiting = true;
 });
 
 app.on("will-quit", () => {

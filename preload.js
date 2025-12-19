@@ -15,6 +15,14 @@ let blockActiveStatus = false
 let blockTypingIndicator = false
 let visibilityPatched = false
 
+const ICONS = {
+  lock: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display:inline-block; vertical-align:middle;"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>',
+  ghost: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display:inline-block; vertical-align:middle;"><path d="M12 2c-4.418 0-8 3.582-8 8v10l3-2 3 2 2-2 2 2 3-2 3 2V10c0-4.418-3.582-8-8-8zm-3 9c-.828 0-1.5-.672-1.5-1.5S8.172 8 9 8s1.5.672 1.5 1.5S9.828 11 9 11zm6 0c-.828 0-1.5-.672-1.5-1.5S14.172 8 15 8s1.5.672 1.5 1.5S15.828 11 15 11z"/></svg>',
+  close: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display:inline-block; vertical-align:middle;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+  check: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style="display:inline-block; vertical-align:middle;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+  cross: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style="display:inline-block; vertical-align:middle;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>'
+}
+
 // expose minimal, safe API to renderer
 contextBridge.exposeInMainWorld('electronAPI', {
   // notification bridge
@@ -117,7 +125,7 @@ function toggleChameleonMode(enabled) {
            <div style="margin-right:20px; font-size:14px;">Data</div>
         </div>
         <div style="background:#f3f2f1; height:30px; border-bottom:1px solid #dadbdc; display:flex; align-items:center; padding-left:40px; font-size:12px; color:#444;">
-          A1 &nbsp;&nbsp; ✕ &nbsp; ✓ &nbsp; <span style="background:white; border:1px solid #ccc; padding:2px 10px; width:300px;">Q3 Financial Projections</span>
+          A1 &nbsp;&nbsp; ${ICONS.cross} &nbsp; ${ICONS.check} &nbsp; <span style="background:white; border:1px solid #ccc; padding:2px 10px; width:300px;">Q3 Financial Projections</span>
         </div>
         <div style="display:grid; grid-template-columns: 40px repeat(10, 1fr); flex:1; overflow:hidden;">
           <div style="background:#f3f2f1; border-right:1px solid #dadbdc; border-bottom:1px solid #dadbdc;"></div>
@@ -331,13 +339,13 @@ function showSettingsModal(config) {
   mainTitle.style.cssText = `margin: 0; font-size: 20px; font-weight: 700; color: ${textColor};`
   
   const subTitle = document.createElement('div')
-  subTitle.textContent = 'v1.1.10 — Settings'
+  subTitle.textContent = 'v1.1.11 — Settings'
   subTitle.style.cssText = `font-size: 12px; color: ${subTextColor}; font-weight: 500; margin-top: 2px;`
   
   titleGroup.append(mainTitle, subTitle)
   
   const closeBtn = document.createElement('div')
-  closeBtn.innerHTML = '&times;'
+  closeBtn.innerHTML = ICONS.close
   closeBtn.style.cssText = `font-size: 24px; cursor: pointer; color: ${subTextColor}; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: background 0.2s;`
   closeBtn.onmouseenter = () => closeBtn.style.background = btnBg;
   closeBtn.onmouseleave = () => closeBtn.style.background = 'transparent';
@@ -916,11 +924,11 @@ function setupInvisibleInk() {
 
     const btn = document.createElement('div')
     btn.id = 'invisible-ink-toggle'
-    btn.innerHTML = '🔒'
+    btn.innerHTML = ICONS.lock
     btn.title = "Invisible Ink Mode"
     btn.style.cssText = `
       position: absolute; bottom: 100%; right: 20px;
-      width: 30px; height: 30px; background: rgba(0,0,0,0.5);
+      width: 40px; height: 40px; background: rgba(0,0,0,0.5);
       border-radius: 50%; display: flex; align-items: center; justify-content: center;
       cursor: pointer; z-index: 100; margin-bottom: 5px;
       font-size: 16px; transition: all 0.2s;
@@ -931,7 +939,7 @@ function setupInvisibleInk() {
       
       if (isInvisibleMode) {
         btn.style.background = '#0084ff'
-        btn.innerHTML = '👻'
+        btn.innerHTML = ICONS.ghost
         if (input) {
             input.setAttribute('data-placeholder-original', input.getAttribute('aria-label') || '')
             // visual feedback
@@ -939,7 +947,7 @@ function setupInvisibleInk() {
         }
       } else {
         btn.style.background = 'rgba(0,0,0,0.5)'
-        btn.innerHTML = '🔒'
+        btn.innerHTML = ICONS.lock
         if (input) input.style.border = 'none'
       }
     }
@@ -991,7 +999,7 @@ function setupInvisibleInk() {
         const btn = document.getElementById('invisible-ink-toggle')
         if (btn) {
             btn.style.background = 'rgba(0,0,0,0.5)'
-            btn.innerHTML = '🔒'
+            btn.innerHTML = ICONS.lock
             input.style.border = 'none'
         }
     }
@@ -1005,10 +1013,12 @@ function setupInvisibleInk() {
         if (text && text.includes(INVISIBLE_SPLIT)) {
             const secret = decodeInvisible(text)
             if (secret) {
-                el.innerText = ' ' // clear
+                el.innerText = '' // clear
                 
                 const lock = document.createElement('span')
-                lock.textContent = '🔒 '
+                lock.innerHTML = ICONS.lock + ' '
+                lock.style.verticalAlign = 'middle'
+                lock.style.marginRight = '4px'
                 
                 const secretSpan = document.createElement('span')
                 secretSpan.textContent = secret
