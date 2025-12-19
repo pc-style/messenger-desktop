@@ -1,7 +1,7 @@
 {
   "name": "messenger-unleashed",
   "productName": "Messenger Unleashed",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Messenger desktop app with extra features",
   "main": "main.js",
   "scripts": {
@@ -53,6 +53,12 @@
           "y": 220,
           "type": "link",
           "path": "/Applications"
+        },
+        {
+          "x": 270,
+          "y": 350,
+          "type": "file",
+          "path": "README.txt"
         }
       ]
     },
