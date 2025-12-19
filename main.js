@@ -269,10 +269,18 @@ function updateRequestBlocker() {
         return callback({ cancel: true });
       }
       
+      // DEBUG: Log any presence/typing related URL that wasn't blocked
+      if (
+        (url.includes("typing") || url.includes("presence") || body.includes("typing")) &&
+        !url.includes("blocked_") // prevent loops if we ever redirect
+      ) {
+         console.log(`\x1b[36m[Unleashed] [TRACE] Potential typing Traffic: ${url.slice(0, 100)}\x1b[0m`);
+      }
+
       return callback({});
     };
     
-    console.log(`\x1b[35m[Unleashed] [BLOCKER] Updated | Read: ${blockReadReceipts} | Typing: ${blockTypingIndicator}\x1b[0m`);
+    console.log(`\x1b[35m[Unleashed] [BLOCKER] Active | Read: ${blockReadReceipts} | Typing: ${blockTypingIndicator}\x1b[0m`);
     session.defaultSession.webRequest.onBeforeRequest(filter, requestBlockerHandler);
   }
 }
@@ -1357,6 +1365,7 @@ function openSettingsUI() {
   // Send the full config so the Settings UI knows what's enabled
   const fullConfig = {
     version: app.getVersion(),
+    shortcuts: store.get("shortcuts"),
     blockReadReceipts: store.get("blockReadReceipts"),
     blockActiveStatus: store.get("blockActiveStatus"),
     blockTypingIndicator: store.get("blockTypingIndicator"),
