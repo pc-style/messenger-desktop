@@ -20,7 +20,7 @@ const debugWebSocketBlocker =
   process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === '1'
 const debugWebSocketBlockerDecode = process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === '1'
 const debugWebSocketTypingTrace = process.env.DEBUG_REQUEST_BLOCKER_WS_TRACE_TYPING === '1'
-const expTypingOverlay = process.env.EXP_BLOCK_TYPING_OVERLAY === '1'
+let expTypingOverlayEnabled = process.env.EXP_BLOCK_TYPING_OVERLAY === '1'
 const isMainFrame = typeof process !== 'undefined' ? process.isMainFrame : true
 
 const textDecoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8') : null
@@ -185,7 +185,7 @@ function cleanupTypingOverlay() {
 }
 
 function installTypingOverlay() {
-  if (!isMainFrame || !expTypingOverlay) return
+  if (!isMainFrame || !expTypingOverlayEnabled) return
   const input =
     document.querySelector('div[role="textbox"][contenteditable="true"]') ||
     document.querySelector('div[contenteditable="true"]') ||
@@ -268,7 +268,7 @@ function installTypingOverlay() {
 }
 
 function updateTypingOverlayState() {
-  const shouldEnable = expTypingOverlay && blockTypingIndicator
+  const shouldEnable = expTypingOverlayEnabled && blockTypingIndicator
   if (shouldEnable && !typingOverlayInterval) {
     typingOverlayInterval = setInterval(installTypingOverlay, 1000)
     installTypingOverlay()
@@ -284,6 +284,11 @@ function updateTypingOverlayState() {
 // typing indicator blocking handled here for WebSocket payloads; keep flag for UI reflection
 ipcRenderer.on('set-block-typing-indicator', (_, enabled) => {
   blockTypingIndicator = enabled
+  updateTypingOverlayState()
+})
+
+ipcRenderer.on('set-exp-typing-overlay', (_, enabled) => {
+  expTypingOverlayEnabled = enabled || process.env.EXP_BLOCK_TYPING_OVERLAY === '1'
   updateTypingOverlayState()
 })
 
@@ -604,6 +609,7 @@ function showSettingsModal(config) {
   privacySection.append(createToggleRow('Block Read Receipts', 'Others won\'t know when you read messages.', 'blockReadReceipts', config.blockReadReceipts))
   privacySection.append(createToggleRow('Block Active Status', 'Appear offline but still see others.', 'blockActiveStatus', config.blockActiveStatus))
   privacySection.append(createToggleRow('Block Typing Indicator', 'Hide "typing..." while you compose.', 'blockTypingIndicator', config.blockTypingIndicator))
+  privacySection.append(createToggleRow('[EXP] Typing Overlay (Better Typing Block)', 'Experimental: hides typing by using a proxy input overlay.', 'expTypingOverlay', config.expTypingOverlay))
   privacySection.append(createToggleRow('Clipboard Sanitizer', 'Remove tracking data from pasted URLs.', 'clipboardSanitize', config.clipboardSanitize))
   
   // Appearance Section

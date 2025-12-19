@@ -52,6 +52,7 @@ const store = new Store({
     clipboardSanitize: true,
     scheduleDelayMs: 30000,
     blockTypingIndicator: false,
+    expTypingOverlay: false,
     windowOpacity: 1.0,
     customCSS: "",
     modernLook: false,
@@ -286,6 +287,7 @@ function shouldBlockTyping(url, body) {
 function updateRequestBlocker() {
   const blockReadReceipts = store.get("blockReadReceipts");
   const blockTypingIndicator = store.get("blockTypingIndicator");
+  const expTypingOverlay = store.get("expTypingOverlay");
   
   const filter = {
     urls: [
@@ -1047,6 +1049,16 @@ function toggleBlockTypingIndicator() {
   updateMenu();
 }
 
+function toggleExpTypingOverlay() {
+  const current = store.get("expTypingOverlay");
+  const newValue = !current;
+  store.set("expTypingOverlay", newValue);
+
+  if (!mainWindow) return;
+  mainWindow.webContents.send("set-exp-typing-overlay", newValue);
+  updateMenu();
+}
+
 function setWindowOpacity(opacity) {
   store.set("windowOpacity", opacity);
   if (mainWindow) {
@@ -1574,6 +1586,7 @@ function openSettingsUI() {
     blockReadReceipts: store.get("blockReadReceipts"),
     blockActiveStatus: store.get("blockActiveStatus"),
     blockTypingIndicator: store.get("blockTypingIndicator"),
+    expTypingOverlay: store.get("expTypingOverlay"),
     clipboardSanitize: store.get("clipboardSanitize"),
     keywordAlertsEnabled: store.get("keywordAlertsEnabled"),
     modernLook: store.get("modernLook"),
@@ -1609,6 +1622,9 @@ ipcMain.on("update-setting", (event, { key, value }) => {
       updateRequestBlocker();
       mainWindow.webContents.send("set-block-typing-indicator", value);
       syncWebSocketProxyFlags();
+      break;
+    case "expTypingOverlay":
+      mainWindow.webContents.send("set-exp-typing-overlay", value);
       break;
     case "clipboardSanitize":
       mainWindow.webContents.send("update-config", { clipboardSanitize: value });
@@ -1997,6 +2013,12 @@ function updateMenu() {
               type: "checkbox",
               checked: blockTypingIndicator,
               click: toggleBlockTypingIndicator,
+            },
+            {
+              label: "[EXP] Typing Overlay (Better Typing Block)",
+              type: "checkbox",
+              checked: expTypingOverlay,
+              click: toggleExpTypingOverlay,
             },
             { type: "separator" },
             {
@@ -2480,6 +2502,10 @@ function createWindow() {
     mainWindow.webContents.send(
       "set-block-typing-indicator",
       store.get("blockTypingIndicator")
+    );
+    mainWindow.webContents.send(
+      "set-exp-typing-overlay",
+      store.get("expTypingOverlay")
     );
 
     ensureWebSocketProxyInstalled();
