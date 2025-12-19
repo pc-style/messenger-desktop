@@ -14,6 +14,86 @@ let blockReadReceipts = false
 let blockActiveStatus = false
 let blockTypingIndicator = false
 let visibilityPatched = false
+const debugWebSocketBlocker =
+  process.env.DEBUG_REQUEST_BLOCKER_WS === '1' ||
+  process.env.DEBUG_REQUEST_BLOCKER_WS_ALL === '1' ||
+  process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === '1'
+
+const textDecoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8') : null
+
+function decodeWebSocketPayload(data) {
+  if (!data) return ''
+  if (typeof data === 'string') return data
+  try {
+    if (data instanceof ArrayBuffer) {
+      const bytes = new Uint8Array(data)
+      return textDecoder ? textDecoder.decode(bytes) : Buffer.from(bytes).toString('utf8')
+    }
+    if (ArrayBuffer.isView(data)) {
+      const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      return textDecoder ? textDecoder.decode(bytes) : Buffer.from(bytes).toString('utf8')
+    }
+    if (typeof Buffer !== 'undefined' && Buffer.isBuffer(data)) {
+      return data.toString('utf8')
+    }
+  } catch (_) {}
+  return ''
+}
+
+function shouldBlockTypingPayload(text) {
+  if (!text) return false
+  return text.toLowerCase().includes('is_typing')
+}
+
+function shouldBlockActiveStatusPayload(text) {
+  if (!text) return false
+  if (text.includes('USER_ACTIVITY_UPDATE_SUBSCRIBE')) return true
+  if (text.includes('USER_ACTIVITY_UPDATE')) return true
+  const lower = text.toLowerCase()
+  if (lower.includes('presence') && lower.includes('active')) return true
+  if (lower.includes('active_status')) return true
+  return false
+}
+
+function installWebSocketInterceptor() {
+  if (typeof window === 'undefined' || !window.WebSocket) return
+  const OriginalWebSocket = window.WebSocket
+
+  function WebSocketProxy(url, protocols) {
+    const ws = protocols ? new OriginalWebSocket(url, protocols) : new OriginalWebSocket(url)
+    const originalSend = ws.send
+
+    ws.send = function (data) {
+      if (blockTypingIndicator || blockActiveStatus) {
+        const decoded = decodeWebSocketPayload(data)
+        if (decoded) {
+          const blockTyping = blockTypingIndicator && shouldBlockTypingPayload(decoded)
+          const blockActive = blockActiveStatus && shouldBlockActiveStatusPayload(decoded)
+          if (blockTyping || blockActive) {
+            if (debugWebSocketBlocker) {
+              const reason = blockTyping ? 'typing' : 'active-status'
+              console.log(`[Unleashed] [WS-BLOCKED] ${reason} ${url}`)
+            }
+            return
+          }
+        }
+      }
+      return originalSend.call(ws, data)
+    }
+
+    return ws
+  }
+
+  WebSocketProxy.prototype = OriginalWebSocket.prototype
+  WebSocketProxy.CONNECTING = OriginalWebSocket.CONNECTING
+  WebSocketProxy.OPEN = OriginalWebSocket.OPEN
+  WebSocketProxy.CLOSING = OriginalWebSocket.CLOSING
+  WebSocketProxy.CLOSED = OriginalWebSocket.CLOSED
+
+  window.WebSocket = WebSocketProxy
+}
+
+installWebSocketInterceptor()
 
 const ICONS = {
   lock: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display:inline-block; vertical-align:middle;"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>',
@@ -74,7 +154,7 @@ function updateVisibilityState() {
   }
 }
 
-// typing indicator blocking now handled in main via webRequest; keep flag for potential UI reflection
+// typing indicator blocking handled here for WebSocket payloads; keep flag for UI reflection
 ipcRenderer.on('set-block-typing-indicator', (_, enabled) => {
   blockTypingIndicator = enabled
 })

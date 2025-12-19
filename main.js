@@ -106,6 +106,67 @@ function getRequestBody(details) {
   }
 }
 
+function parseGraphqlBody(body) {
+  const result = {
+    friendlyName: "",
+    docId: "",
+    variablesText: "",
+    rawText: body || "",
+  };
+
+  if (!body || typeof body !== "string") return result;
+
+  const trimmed = body.trim();
+  const tryJSON = (value) => {
+    try {
+      return JSON.parse(value);
+    } catch (_) {
+      return null;
+    }
+  };
+
+  if (trimmed.startsWith("{")) {
+    const parsed = tryJSON(trimmed);
+    if (parsed && typeof parsed === "object") {
+      result.friendlyName = parsed.fb_api_req_friendly_name || parsed.friendly_name || "";
+      result.docId = parsed.doc_id || parsed.document_id || "";
+      if (parsed.variables) {
+        result.variablesText = JSON.stringify(parsed.variables);
+      }
+      return result;
+    }
+  }
+
+  try {
+    const params = new URLSearchParams(body);
+    result.friendlyName =
+      params.get("fb_api_req_friendly_name") ||
+      params.get("friendly_name") ||
+      "";
+    result.docId = params.get("doc_id") || params.get("document_id") || "";
+
+    const variablesRaw = params.get("variables");
+    if (variablesRaw) {
+      const parsedVars = tryJSON(variablesRaw);
+      result.variablesText = parsedVars
+        ? JSON.stringify(parsedVars)
+        : variablesRaw;
+    } else {
+      const queriesRaw = params.get("queries");
+      if (queriesRaw) {
+        const parsedQueries = tryJSON(queriesRaw);
+        result.variablesText = parsedQueries
+          ? JSON.stringify(parsedQueries)
+          : queriesRaw;
+      }
+    }
+  } catch (_) {
+    // ignore parse failures
+  }
+
+  return result;
+}
+
 function isTypingIndicatorPayload(body) {
   if (!body || typeof body !== "string") return false;
 
@@ -230,6 +291,12 @@ function updateRequestBlocker() {
     urls: [
       "https://*.messenger.com/*",
       "https://*.facebook.com/*",
+      "https://edge-chat.messenger.com/*",
+      "https://edge-chat.facebook.com/*",
+      "wss://*.messenger.com/*",
+      "wss://*.facebook.com/*",
+      "wss://edge-chat.messenger.com/*",
+      "wss://edge-chat.facebook.com/*",
       "http://localhost:3103/*",
     ],
   };
@@ -259,8 +326,8 @@ function updateRequestBlocker() {
         return callback({ cancel: true });
       }
       
-      // Check typing indicator blocking
-      if (blockTypingIndicator && shouldBlockTyping(url, body)) {
+      // Check typing indicator blocking (skip WebSockets; handled in preload)
+      if (blockTypingIndicator && details.resourceType !== "websocket" && shouldBlockTyping(url, body)) {
         console.log(`\x1b[33m[Unleashed] [BLOCKED] TYPING INDICATOR:\x1b[0m ${url.slice(0, 150)}`);
         return callback({ cancel: true });
       }
@@ -2120,6 +2187,9 @@ function updateMenu() {
 
 function createWindow() {
   const bounds = store.get("windowBounds");
+  const debugWebSocketFrames = process.env.DEBUG_REQUEST_BLOCKER_WS === "1";
+  const debugWebSocketFramesAll = process.env.DEBUG_REQUEST_BLOCKER_WS_ALL === "1";
+  const debugWebSocketFramesDecode = process.env.DEBUG_REQUEST_BLOCKER_WS_DECODE === "1";
 
   mainWindow = new BrowserWindow({
     width: bounds.width,
@@ -2138,6 +2208,7 @@ function createWindow() {
 
   mainWindow.webContents.setUserAgent(USER_AGENT);
   mainWindow.webContents.setMaxListeners(20);
+  const webSocketUrls = new Map();
 
   const opacity = store.get("windowOpacity");
   if (opacity < 1.0) {
@@ -2174,6 +2245,63 @@ function createWindow() {
 
   // apply request blockers before loading content (read receipts + typing indicator)
   updateRequestBlocker();
+
+  if (debugWebSocketFrames || debugWebSocketFramesAll) {
+    try {
+      if (!mainWindow.webContents.debugger.isAttached()) {
+        mainWindow.webContents.debugger.attach("1.3");
+      }
+      mainWindow.webContents.debugger.sendCommand("Network.enable");
+      mainWindow.webContents.debugger.on("message", (event, method, params) => {
+        if (method === "Network.webSocketCreated" && params && params.requestId) {
+          webSocketUrls.set(params.requestId, params.url || "");
+          return;
+        }
+        if (method === "Network.webSocketClosed" && params && params.requestId) {
+          webSocketUrls.delete(params.requestId);
+          return;
+        }
+        if (method !== "Network.webSocketFrameSent" && method !== "Network.webSocketFrameReceived") return;
+
+        const response = params && params.response ? params.response : {};
+        const payload = typeof response.payloadData === "string" ? response.payloadData : "";
+        const opcode = response.opcode;
+        const isText = opcode === 1;
+        let decodedText = "";
+        if (!isText && debugWebSocketFramesDecode && payload) {
+          try {
+            const decoded = Buffer.from(payload, "base64").toString("utf8");
+            if (decoded && /[\x20-\x7E]/.test(decoded)) {
+              decodedText = decoded;
+            }
+          } catch (_) {}
+        }
+        const searchable = (isText ? payload : decodedText).toLowerCase();
+        const hasTyping = searchable.includes("typing");
+        const hasPresence = searchable.includes("presence");
+        const hasActive = searchable.includes("active");
+        const hasRead = searchable.includes("read");
+        const shouldLog =
+          debugWebSocketFramesAll || hasTyping || hasPresence || hasActive || hasRead;
+
+        if (shouldLog) {
+          const direction = method === "Network.webSocketFrameSent" ? "WS-SEND" : "WS-RECV";
+          const url = webSocketUrls.get(params.requestId) || "";
+          let preview = ` payloadLen=${payload.length}`;
+          if (isText && payload.length) {
+            preview = ` payload=${payload.slice(0, 300)}`;
+          } else if (decodedText) {
+            preview = ` payloadDecoded=${decodedText.slice(0, 300)}`;
+          }
+          console.log(
+            `[Unleashed] [${direction}]${url ? ` ${url}` : ""} opcode=${opcode} typing=${hasTyping} presence=${hasPresence} active=${hasActive} read=${hasRead}${preview}`
+          );
+        }
+      });
+    } catch (error) {
+      console.log(`[Unleashed] [WS-DEBUG] Failed to attach debugger: ${error.message}`);
+    }
+  }
 
   mainWindow.loadURL("https://www.messenger.com");
 
@@ -2215,6 +2343,14 @@ function createWindow() {
 
     applyModernLook();
     applyFloatingGlass();
+  });
+
+  mainWindow.on("closed", () => {
+    try {
+      if (mainWindow && mainWindow.webContents && mainWindow.webContents.debugger.isAttached()) {
+        mainWindow.webContents.debugger.detach();
+      }
+    } catch (_) {}
   });
 
   mainWindow.on("minimize", () => {
