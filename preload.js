@@ -922,7 +922,10 @@ function setupInvisibleInk() {
                     document.querySelector('div[aria-label="Conversation actions"]')
     
     // Look for the input area container to attach
-    const inputArea = document.querySelector('div[role="textbox"]')
+    const inputArea = document.querySelector('div[role="textbox"]') || 
+                      document.querySelector('div[contenteditable="true"]') ||
+                      document.querySelector('div[aria-label="Message"]')
+                      
     if (!inputArea) return
 
     if (document.getElementById('invisible-ink-toggle')) return
