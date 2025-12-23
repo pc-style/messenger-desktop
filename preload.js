@@ -149,6 +149,16 @@ ipcRenderer.on('update-config', (_, newConfig) => {
   config = { ...config, ...newConfig }
 })
 
+ipcRenderer.on('show-toast', (_, payload) => {
+  if (typeof payload === 'string') {
+    showToast(payload)
+    return
+  }
+  const message = payload?.message
+  if (!message) return
+  showToast(message, payload)
+})
+
 ipcRenderer.on('set-block-read-receipts', (_, enabled) => {
   blockReadReceipts = enabled
   updateVisibilityState()
@@ -648,6 +658,28 @@ function showSettingsModal(config) {
     return row
   }
 
+  const createActionRow = (label, desc, buttonLabel, onClick) => {
+    const row = document.createElement('div')
+    row.className = 'settings-row'
+
+    const info = document.createElement('div')
+    const l = document.createElement('div')
+    l.className = 'settings-label'
+    l.textContent = label
+    const d = document.createElement('div')
+    d.className = 'settings-desc'
+    d.textContent = desc
+    info.append(l, d)
+
+    const btn = document.createElement('button')
+    btn.className = 'settings-btn'
+    btn.textContent = buttonLabel
+    btn.onclick = onClick
+
+    row.append(info, btn)
+    return row
+  }
+
   // Privacy Section
   const privacySection = document.createElement('div')
   privacySection.className = 'settings-section'
@@ -659,6 +691,11 @@ function showSettingsModal(config) {
   privacySection.append(createToggleRow('Block Typing Indicator', 'Hide "typing..." while you compose.', 'blockTypingIndicator', config.blockTypingIndicator))
   privacySection.append(createToggleRow('[EXP] Typing Overlay (Better Typing Block)', 'Experimental: hides typing by using a proxy input overlay.', 'expTypingOverlay', config.expTypingOverlay))
   privacySection.append(createToggleRow('Clipboard Sanitizer', 'Remove tracking data from pasted URLs.', 'clipboardSanitize', config.clipboardSanitize))
+  privacySection.append(createToggleRow('Keyword Alerts', 'Notify you when keywords appear.', 'keywordAlertsEnabled', config.keywordAlertsEnabled))
+  privacySection.append(createActionRow('Edit Keywords', 'Add or remove keyword triggers.', 'Edit', () => {
+    overlay.remove()
+    ipcRenderer.send('edit-keywords')
+  }))
   
   // Appearance Section
   const appearanceSection = document.createElement('div')
@@ -693,9 +730,26 @@ function showSettingsModal(config) {
   const systemTitle = document.createElement('h4')
   systemTitle.textContent = 'System & Tools'
   systemSection.append(systemTitle)
+  systemSection.append(createToggleRow('Do Not Disturb', 'Mute notifications from Messenger.', 'doNotDisturb', config.doNotDisturb))
   systemSection.append(createToggleRow('Always on Top', 'Keep Messenger above other windows.', 'alwaysOnTop', config.alwaysOnTop))
   systemSection.append(createToggleRow('Launch at Login', 'Start the app automatically.', 'launchAtLogin', config.launchAtLogin))
   systemSection.append(createToggleRow('Spell Check', 'Check spelling as you type.', 'spellCheck', config.spellCheck))
+
+  // Power Tools Section
+  const powerSection = document.createElement('div')
+  powerSection.className = 'settings-section'
+  const powerTitle = document.createElement('h4')
+  powerTitle.textContent = 'Power Tools'
+  powerSection.append(powerTitle)
+  powerSection.append(createToggleRow('Quiet Hours', 'Auto-enable Do Not Disturb on a schedule.', 'quietHoursEnabled', config.quietHoursEnabled))
+  powerSection.append(createActionRow('Quiet Hours Schedule', `Current: ${config.quietHoursLabel || 'Not set'}`, 'Set Hours', () => {
+    overlay.remove()
+    ipcRenderer.send('edit-quiet-hours')
+  }))
+  powerSection.append(createActionRow('Quick Replies', `Configure ${config.quickReplies ? config.quickReplies.length : 0} shortcuts.`, 'Edit', () => {
+    overlay.remove()
+    ipcRenderer.send('edit-quick-replies')
+  }))
 
   // Shortcuts Section
   const shortcutSection = document.createElement('div')
@@ -789,7 +843,7 @@ function showSettingsModal(config) {
   renderShortcuts()
   shortcutSection.append(shortcutList)
 
-  scrollArea.append(privacySection, appearanceSection, systemSection, shortcutSection)
+  scrollArea.append(privacySection, appearanceSection, systemSection, powerSection, shortcutSection)
 
   const footer = document.createElement('div')
   footer.className = 'close-area'
@@ -1055,6 +1109,55 @@ function scheduleSend(delayMs) {
     })
     input.dispatchEvent(enterEvent)
   }, delayMs)
+}
+
+function ensureToastContainer() {
+  let container = document.getElementById('unleashed-toast-container')
+  if (container) return container
+
+  container = document.createElement('div')
+  container.id = 'unleashed-toast-container'
+  container.style.cssText = `
+    position: fixed; bottom: 20px; right: 20px; z-index: 2147483646;
+    display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+    pointer-events: none; max-width: 60vw;
+  `
+  document.body.appendChild(container)
+  return container
+}
+
+function showToast(message, options = {}) {
+  const container = ensureToastContainer()
+  if (!container) return
+
+  const tone = options.tone || 'info'
+  const duration = typeof options.duration === 'number' ? options.duration : 3200
+
+  const accent = tone === 'success' ? '#30d158' : tone === 'warning' ? '#ffd60a' : '#0084ff'
+  const toast = document.createElement('div')
+  toast.textContent = message
+  toast.style.cssText = `
+    background: rgba(18, 18, 18, 0.92); color: #fff;
+    padding: 10px 14px; border-radius: 10px; font-size: 12px; font-weight: 600;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+    border-left: 3px solid ${accent};
+    transform: translateY(6px); opacity: 0;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  `
+
+  container.appendChild(toast)
+  requestAnimationFrame(() => {
+    toast.style.opacity = '1'
+    toast.style.transform = 'translateY(0)'
+  })
+
+  const remove = () => {
+    toast.style.opacity = '0'
+    toast.style.transform = 'translateY(6px)'
+    setTimeout(() => toast.remove(), 200)
+  }
+
+  setTimeout(remove, Math.max(1200, duration))
 }
 
 // detect if Messenger has a custom background image/theme applied

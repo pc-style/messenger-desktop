@@ -9,6 +9,11 @@ Messenger desktop app with extra features.
 - **Compact Mode** - Reduced spacing for more content
 - **Picture in Picture** - Floating mini window (`Cmd+Shift+P`)
 - **Do Not Disturb** - Suppress notifications (`Cmd+Shift+D`)
+- **Quiet Hours** - Auto-enable Do Not Disturb on a schedule
+- **Quick Replies** - Send saved replies with `Cmd+Shift+[key]`
+- **Privacy Tools** - Block read receipts, typing indicator, active status
+- **Keyword Alerts** - Notifications when matching words appear
+- **Clipboard Sanitizer** - Strip tracking params from pasted URLs
 - Full WebRTC support for video/audio calls
 - Settings persist between sessions
 
@@ -40,8 +45,12 @@ All features accessible via **Unleashed** menu or keyboard shortcuts:
 | Always on Top      | `Cmd+Shift+T` |
 | Do Not Disturb     | `Cmd+Shift+D` |
 | Picture in Picture | `Cmd+Shift+P` |
+| Focus Mode         | `Cmd+Shift+F` |
+| Quick Reply        | `Cmd+Shift+[key]` |
 
 Themes: **Unleashed → Theme** menu
+Settings: **Unleashed → Open Settings...** (`CmdOrCtrl+,`)
+Quiet Hours: **Unleashed → Power Tools → Quiet Hours**
 
 ## Development
 
