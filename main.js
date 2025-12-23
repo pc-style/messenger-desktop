@@ -43,6 +43,9 @@ const store = new Store({
       { key: "1", text: "On my way!" },
       { key: "2", text: "Be right back" },
       { key: "3", text: "Sounds good!" },
+      { key: "4", text: "Can we talk later?" },
+      { key: "5", text: "Thanks!" },
+      { key: "6", text: "Let me check and get back to you." },
     ],
     menuBarMode: false,
     blockReadReceipts: false,
@@ -58,6 +61,10 @@ const store = new Store({
     customCSS: "",
     modernLook: false,
     floatingGlass: false,
+    quietHoursEnabled: false,
+    quietHoursStart: "22:00",
+    quietHoursEnd: "07:00",
+    quietHoursApplied: false,
     shortcuts: {
       "toggleAlwaysOnTop": "CmdOrCtrl+Shift+T",
       "toggleDoNotDisturb": "CmdOrCtrl+Shift+D",
@@ -82,6 +89,7 @@ let pipWindow = null;
 let tray = null;
 let unreadCount = 0;
 let typingBlockerHandler = null;
+let quietHoursTimer = null;
 
 // combine uploaded body buffers into string
 function getRequestBody(details) {
@@ -710,7 +718,167 @@ function toggleAlwaysOnTop() {
 function toggleDoNotDisturb() {
   const current = store.get("doNotDisturb");
   store.set("doNotDisturb", !current);
+  store.set("quietHoursApplied", false);
   updateMenu();
+}
+
+function parseTimeInput(value) {
+  if (!value || typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (!match) return null;
+
+  let hours = parseInt(match[1], 10);
+  let minutes = parseInt(match[2] || "0", 10);
+  const meridiem = match[3];
+
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  if (minutes < 0 || minutes > 59) return null;
+
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return null;
+    if (meridiem === "pm" && hours !== 12) hours += 12;
+    if (meridiem === "am" && hours === 12) hours = 0;
+  } else if (hours > 23) {
+    return null;
+  }
+
+  return hours * 60 + minutes;
+}
+
+function formatTimeLabel(minutes) {
+  if (!Number.isFinite(minutes)) return "Not set";
+  const safeMinutes = Math.max(0, Math.min(23 * 60 + 59, minutes));
+  const hours24 = Math.floor(safeMinutes / 60);
+  const mins = safeMinutes % 60;
+  const suffix = hours24 >= 12 ? "PM" : "AM";
+  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+  return `${hours12}:${String(mins).padStart(2, "0")} ${suffix}`;
+}
+
+function getQuietHoursRangeLabel() {
+  const start = parseTimeInput(store.get("quietHoursStart"));
+  const end = parseTimeInput(store.get("quietHoursEnd"));
+  if (start === null || end === null) return "Not set";
+  return `${formatTimeLabel(start)} → ${formatTimeLabel(end)}`;
+}
+
+function isWithinQuietHours(nowMinutes, startMinutes, endMinutes) {
+  if (startMinutes === endMinutes) return true;
+  if (startMinutes < endMinutes) {
+    return nowMinutes >= startMinutes && nowMinutes < endMinutes;
+  }
+  return nowMinutes >= startMinutes || nowMinutes < endMinutes;
+}
+
+function applyQuietHours() {
+  const enabled = store.get("quietHoursEnabled");
+  const applied = store.get("quietHoursApplied");
+  if (!enabled) {
+    if (applied && store.get("doNotDisturb")) {
+      store.set("doNotDisturb", false);
+      updateMenu();
+    }
+    if (applied) store.set("quietHoursApplied", false);
+    return;
+  }
+
+  const start = parseTimeInput(store.get("quietHoursStart"));
+  const end = parseTimeInput(store.get("quietHoursEnd"));
+  if (start === null || end === null) return;
+
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const shouldEnable = isWithinQuietHours(nowMinutes, start, end);
+  const dnd = store.get("doNotDisturb");
+
+  if (shouldEnable && !dnd) {
+    store.set("doNotDisturb", true);
+    store.set("quietHoursApplied", true);
+    updateMenu();
+  } else if (!shouldEnable && applied && dnd) {
+    store.set("doNotDisturb", false);
+    store.set("quietHoursApplied", false);
+    updateMenu();
+  }
+}
+
+function startQuietHoursMonitor() {
+  if (quietHoursTimer) {
+    clearInterval(quietHoursTimer);
+  }
+  quietHoursTimer = setInterval(applyQuietHours, 60 * 1000);
+  applyQuietHours();
+}
+
+function toggleQuietHours() {
+  const next = !store.get("quietHoursEnabled");
+  store.set("quietHoursEnabled", next);
+  applyQuietHours();
+  updateMenu();
+}
+
+async function editQuietHours({ reopenSettings = false } = {}) {
+  if (!mainWindow) return;
+
+  const currentStart = store.get("quietHoursStart");
+  const currentEnd = store.get("quietHoursEnd");
+
+  const startValue = await openInputDialog({
+    title: "Quiet Hours Start",
+    message: "Enter a start time (e.g. 22:00 or 10:00 PM):",
+    defaultValue: currentStart,
+  });
+
+  if (startValue === null) return;
+  const parsedStart = parseTimeInput(startValue);
+  if (parsedStart === null) {
+    dialog.showErrorBox(
+      "Invalid Time",
+      "Start time must be a valid time like 22:00 or 10:00 PM."
+    );
+    return;
+  }
+
+  const endValue = await openInputDialog({
+    title: "Quiet Hours End",
+    message: "Enter an end time (e.g. 07:00 or 7:00 AM):",
+    defaultValue: currentEnd,
+  });
+
+  if (endValue === null) return;
+  const parsedEnd = parseTimeInput(endValue);
+  if (parsedEnd === null) {
+    dialog.showErrorBox(
+      "Invalid Time",
+      "End time must be a valid time like 07:00 or 7:00 AM."
+    );
+    return;
+  }
+
+  const normalizeTime = (minutes) => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+  };
+
+  store.set("quietHoursStart", normalizeTime(parsedStart));
+  store.set("quietHoursEnd", normalizeTime(parsedEnd));
+  applyQuietHours();
+  updateMenu();
+
+  if (mainWindow) {
+    mainWindow.webContents.send("show-toast", {
+      message: `Quiet Hours set to ${getQuietHoursRangeLabel()}.`,
+      tone: "success",
+    });
+  }
+
+  if (reopenSettings) {
+    openSettingsUI();
+  }
 }
 
 function toggleLaunchAtLogin() {
@@ -802,6 +970,76 @@ function sendQuickReply(text) {
       return true;
     })()
   `);
+}
+
+function formatQuickRepliesInput(quickReplies) {
+  return (quickReplies || [])
+    .map((qr) => `${qr.key}: ${qr.text}`)
+    .join("\n");
+}
+
+function parseQuickRepliesInput(value) {
+  const lines = (value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const seen = new Set();
+  const replies = [];
+
+  for (const line of lines) {
+    let match = line.match(/^([a-zA-Z0-9])\s*[:\-\|]\s*(.+)$/);
+    if (!match) {
+      match = line.match(/^([a-zA-Z0-9])\s+(.+)$/);
+    }
+    if (!match) continue;
+
+    const key = match[1].toUpperCase();
+    const text = match[2].trim();
+    if (!text) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    replies.push({ key, text });
+  }
+
+  return replies;
+}
+
+async function editQuickReplies({ reopenSettings = false } = {}) {
+  if (!mainWindow) return;
+  const existing = store.get("quickReplies") || [];
+  const value = await openInputDialog({
+    title: "Quick Replies",
+    message: "One per line. Format: KEY: message (e.g. 1: On my way!)",
+    defaultValue: formatQuickRepliesInput(existing),
+    multiline: true,
+  });
+
+  if (value === null) return;
+
+  const parsed = parseQuickRepliesInput(value);
+  if (!parsed.length) {
+    dialog.showErrorBox(
+      "Quick Replies",
+      "No valid quick replies were found. Use the format: KEY: message"
+    );
+    return;
+  }
+
+  store.set("quickReplies", parsed);
+  registerGlobalShortcuts();
+  updateMenu();
+
+  if (mainWindow) {
+    mainWindow.webContents.send("show-toast", {
+      message: `Saved ${parsed.length} quick repl${parsed.length === 1 ? "y" : "ies"}.`,
+      tone: "success",
+    });
+  }
+
+  if (reopenSettings) {
+    openSettingsUI();
+  }
 }
 
 function toggleMenuBarMode() {
@@ -977,6 +1215,13 @@ async function editKeywordAlerts() {
     store.set("keywordAlerts", list);
     pushRendererConfig();
     updateMenu();
+
+    if (mainWindow) {
+      mainWindow.webContents.send("show-toast", {
+        message: `Keyword alerts updated (${list.length}).`,
+        tone: "success",
+      });
+    }
   }
 }
 
@@ -990,6 +1235,12 @@ ipcMain.on("keyword-input-result", (event, result) => {
   store.set("keywordAlerts", list);
   pushRendererConfig();
   updateMenu();
+  if (mainWindow) {
+    mainWindow.webContents.send("show-toast", {
+      message: `Keyword alerts updated (${list.length}).`,
+      tone: "success",
+    });
+  }
 });
 
 function pushRendererConfig() {
@@ -1613,6 +1864,7 @@ function openSettingsUI() {
     expTypingOverlay: store.get("expTypingOverlay"),
     clipboardSanitize: store.get("clipboardSanitize"),
     keywordAlertsEnabled: store.get("keywordAlertsEnabled"),
+    doNotDisturb: store.get("doNotDisturb"),
     modernLook: store.get("modernLook"),
     floatingGlass: store.get("floatingGlass"),
     theme: store.get("theme"),
@@ -1622,6 +1874,11 @@ function openSettingsUI() {
     launchAtLogin: store.get("launchAtLogin"),
     spellCheck: store.get("spellCheck"),
     scheduleDelayMs: store.get("scheduleDelayMs"),
+    quietHoursEnabled: store.get("quietHoursEnabled"),
+    quietHoursStart: store.get("quietHoursStart"),
+    quietHoursEnd: store.get("quietHoursEnd"),
+    quietHoursLabel: getQuietHoursRangeLabel(),
+    quickReplies: store.get("quickReplies"),
   }
 
   mainWindow.webContents.send("open-settings-modal", fullConfig);
@@ -1649,6 +1906,18 @@ ipcMain.on("update-setting", (event, { key, value }) => {
       break;
     case "expTypingOverlay":
       mainWindow.webContents.send("set-exp-typing-overlay", value);
+      break;
+    case "quietHoursEnabled":
+      store.set("quietHoursEnabled", value);
+      applyQuietHours();
+      break;
+    case "keywordAlertsEnabled":
+      store.set("keywordAlertsEnabled", value);
+      pushRendererConfig();
+      break;
+    case "doNotDisturb":
+      store.set("doNotDisturb", value);
+      store.set("quietHoursApplied", false);
       break;
     case "clipboardSanitize":
       mainWindow.webContents.send("update-config", { clipboardSanitize: value });
@@ -1679,6 +1948,18 @@ ipcMain.on("update-setting", (event, { key, value }) => {
 
 ipcMain.on("edit-custom-css", () => {
   editCustomCSS();
+});
+
+ipcMain.on("edit-keywords", () => {
+  editKeywordAlerts();
+});
+
+ipcMain.on("edit-quick-replies", () => {
+  editQuickReplies({ reopenSettings: true });
+});
+
+ipcMain.on("edit-quiet-hours", () => {
+  editQuietHours({ reopenSettings: true });
 });
 
 // IPC handler for CSS input result
@@ -1975,6 +2256,11 @@ function updateMenu() {
   const expTypingOverlay = store.get("expTypingOverlay");
   const windowOpacity = store.get("windowOpacity");
   const customCSS = store.get("customCSS");
+  const quietHoursEnabled = store.get("quietHoursEnabled");
+  const quietHoursStart = store.get("quietHoursStart");
+  const quietHoursEnd = store.get("quietHoursEnd");
+  const quietHoursStartLabel = formatTimeLabel(parseTimeInput(quietHoursStart));
+  const quietHoursEndLabel = formatTimeLabel(parseTimeInput(quietHoursEnd));
 
   const template = [
     {
@@ -2275,11 +2561,15 @@ function updateMenu() {
             },
             {
               label: "Quick Replies",
-              submenu: quickReplies.map((qr) => ({
-                label: `[${qr.key}] ${qr.text}`,
-                accelerator: `CmdOrCtrl+Shift+${qr.key}`,
-                click: () => sendQuickReply(qr.text),
-              })),
+              submenu: [
+                ...quickReplies.map((qr) => ({
+                  label: `[${qr.key}] ${qr.text}`,
+                  accelerator: `CmdOrCtrl+Shift+${qr.key}`,
+                  click: () => sendQuickReply(qr.text),
+                })),
+                { type: "separator" },
+                { label: "Edit Quick Replies...", click: editQuickReplies },
+              ],
             },
             { type: "separator" },
             {
@@ -2293,6 +2583,27 @@ function updateMenu() {
               checked: dnd,
               accelerator: "CmdOrCtrl+Shift+D",
               click: toggleDoNotDisturb,
+            },
+            {
+              label: `Quiet Hours (${getQuietHoursRangeLabel()})`,
+              submenu: [
+                {
+                  label: "Enable",
+                  type: "checkbox",
+                  checked: quietHoursEnabled,
+                  click: toggleQuietHours,
+                },
+                {
+                  label: `Start: ${quietHoursStartLabel}`,
+                  enabled: false,
+                },
+                {
+                  label: `End: ${quietHoursEndLabel}`,
+                  enabled: false,
+                },
+                { type: "separator" },
+                { label: "Set Quiet Hours...", click: () => editQuietHours() },
+              ],
             },
           ],
         },
@@ -2623,8 +2934,11 @@ function registerGlobalShortcuts() {
   globalShortcut.register("CmdOrCtrl+Down", () => navigateConversation("down"));
 
   const quickReplies = store.get("quickReplies");
-  quickReplies.forEach((qr) => {
-    globalShortcut.register(`CmdOrCtrl+Shift+${qr.key}`, () =>
+  (quickReplies || []).forEach((qr) => {
+    if (!qr || !qr.key || typeof qr.key !== "string") return;
+    const key = qr.key.trim().toUpperCase();
+    if (!/^[A-Z0-9]$/.test(key)) return;
+    globalShortcut.register(`CmdOrCtrl+Shift+${key}`, () =>
       sendQuickReply(qr.text)
     );
   });
@@ -2647,6 +2961,7 @@ app.whenReady().then(() => {
   }
 
   createWindow();
+  startQuietHoursMonitor();
   checkForUpdates();
 
   app.on("activate", () => {
@@ -2664,6 +2979,10 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   isAppQuiting = true;
+  if (quietHoursTimer) {
+    clearInterval(quietHoursTimer);
+    quietHoursTimer = null;
+  }
 });
 
 app.on("will-quit", () => {
