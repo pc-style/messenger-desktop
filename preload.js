@@ -7,6 +7,7 @@ let config = {
   clipboardSanitize: false,
   scheduleDelayMs: 30000,
   blockTypingIndicator: false,
+  androidBubbles: false,
   shortcuts: {}
 }
 
@@ -523,8 +524,37 @@ function showSettingsModal(config) {
         from { opacity: 0; transform: scale(0.98) translateY(10px); }
         to { opacity: 1; transform: scale(1) translateY(0); }
       }
-      .settings-section { padding: 20px; border-bottom: 1px solid ${sectionBorderColor}; }
-      .settings-section h4 { margin: 0 0 15px 0; color: ${subTextColor}; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; font-weight: 600; }
+      .settings-body { min-height: 0; }
+      .settings-tabs {
+        width: 170px; padding: 12px;
+        border-right: 1px solid ${sectionBorderColor};
+        display: flex; flex-direction: column; gap: 6px;
+      }
+      .settings-tab {
+        border: none; background: transparent; color: ${subTextColor};
+        text-align: left; padding: 10px 12px; border-radius: 10px;
+        font-size: 13px; font-weight: 600; cursor: pointer;
+        transition: background 0.2s, color 0.2s;
+      }
+      .settings-tab.active {
+        background: ${isDarkMode ? 'rgba(0,132,255,0.18)' : 'rgba(0,132,255,0.12)'};
+        color: ${textColor};
+      }
+      .settings-panels { flex: 1; overflow: hidden; }
+      .settings-panel {
+        display: none; height: 100%; overflow-y: auto; padding: 4px 0;
+      }
+      .settings-panel.active { display: block; }
+      .settings-panel-title {
+        padding: 16px 24px 6px;
+        color: ${subTextColor};
+        text-transform: uppercase;
+        font-size: 11px;
+        letter-spacing: 0.6px;
+        font-weight: 700;
+      }
+      .settings-section { padding: 12px 24px 20px; border-bottom: 1px solid ${sectionBorderColor}; }
+      .settings-section h4 { display: none; }
       .settings-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
       .settings-row:last-child { margin-bottom: 0; }
       .settings-label { font-size: 14px; font-weight: 500; }
@@ -552,9 +582,9 @@ function showSettingsModal(config) {
       .close-area { padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.02); }
       
       /* Scrollbar styling */
-      .settings-scroll::-webkit-scrollbar { width: 8px; }
-      .settings-scroll::-webkit-scrollbar-track { background: transparent; }
-      .settings-scroll::-webkit-scrollbar-thumb { background: ${isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}; border-radius: 4px; }
+      .settings-panel::-webkit-scrollbar { width: 8px; }
+      .settings-panel::-webkit-scrollbar-track { background: transparent; }
+      .settings-panel::-webkit-scrollbar-thumb { background: ${isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}; border-radius: 4px; }
     `;
 
     mainTitle.style.color = textColor;
@@ -626,9 +656,15 @@ function showSettingsModal(config) {
   
   header.append(titleGroup, closeBtn)
 
-  const scrollArea = document.createElement('div')
-  scrollArea.className = 'settings-scroll'
-  scrollArea.style.cssText = 'flex: 1; overflow-y: auto; padding: 4px 0;'
+  const body = document.createElement('div')
+  body.className = 'settings-body'
+  body.style.cssText = 'flex: 1; min-height: 0; display: flex;'
+
+  const tabs = document.createElement('div')
+  tabs.className = 'settings-tabs'
+
+  const panels = document.createElement('div')
+  panels.className = 'settings-panels'
 
   const createToggleRow = (label, desc, key, initialValue) => {
     const row = document.createElement('div')
@@ -680,6 +716,31 @@ function showSettingsModal(config) {
     return row
   }
 
+  const formatThemeLabel = (theme) => {
+    const map = {
+      default: 'Default',
+      oled: 'OLED Dark',
+      nord: 'Nord',
+      dracula: 'Dracula',
+      solarized: 'Solarized Dark',
+      highcontrast: 'High Contrast',
+      alternative: '[EXP] Alternative Look',
+      crimson: 'Crimson',
+      electriccrimson: 'Electric Crimson',
+      neoncoral: 'Neon Coral',
+      infernoorange: 'Inferno Orange',
+      solargold: 'Solar Gold',
+      acidlime: 'Acid Lime',
+      emeraldflash: 'Emerald Flash',
+      cyberteal: 'Cyber Teal',
+      electricblue: 'Electric Blue',
+      ultraviolet: 'Ultraviolet',
+      hotmagenta: 'Hot Magenta',
+      compact: 'Compact Mode'
+    }
+    return map[theme] || 'Default'
+  }
+
   // Privacy Section
   const privacySection = document.createElement('div')
   privacySection.className = 'settings-section'
@@ -705,6 +766,11 @@ function showSettingsModal(config) {
   appearanceSection.append(appearanceTitle)
   appearanceSection.append(createToggleRow('Modern Look (Floating)', 'A lighter, floating UI design.', 'modernLook', config.modernLook))
   appearanceSection.append(createToggleRow('Floating Glass (Theme Override)', 'Premium glassmorphism aesthetics.', 'floatingGlass', config.floatingGlass))
+  appearanceSection.append(createToggleRow('[EXP] Android Bubbles', 'Rounded Android-style chat bubbles.', 'androidBubbles', config.androidBubbles))
+  appearanceSection.append(createActionRow('Theme', `Current: ${formatThemeLabel(config.theme)}`, 'Choose', () => {
+    overlay.remove()
+    ipcRenderer.send('pick-theme')
+  }))
   
   // Customization controls
   const customRow = document.createElement('div')
@@ -843,7 +909,53 @@ function showSettingsModal(config) {
   renderShortcuts()
   shortcutSection.append(shortcutList)
 
-  scrollArea.append(privacySection, appearanceSection, systemSection, powerSection, shortcutSection)
+  const makePanel = (id, titleText, sectionEl) => {
+    const panel = document.createElement('div')
+    panel.className = 'settings-panel'
+    panel.dataset.tab = id
+    const panelTitle = document.createElement('div')
+    panelTitle.className = 'settings-panel-title'
+    panelTitle.textContent = titleText
+    panel.append(panelTitle, sectionEl)
+    return panel
+  }
+
+  const privacyPanel = makePanel('privacy', 'Privacy & Stealth', privacySection)
+  const appearancePanel = makePanel('appearance', 'Appearance', appearanceSection)
+  const systemPanel = makePanel('system', 'System & Tools', systemSection)
+  const powerPanel = makePanel('power', 'Power Tools', powerSection)
+  const shortcutsPanel = makePanel('shortcuts', 'Keyboard Shortcuts', shortcutSection)
+
+  panels.append(appearancePanel, privacyPanel, systemPanel, powerPanel, shortcutsPanel)
+
+  const tabItems = [
+    { id: 'appearance', label: 'Appearance' },
+    { id: 'privacy', label: 'Privacy' },
+    { id: 'system', label: 'System' },
+    { id: 'power', label: 'Power Tools' },
+    { id: 'shortcuts', label: 'Shortcuts' }
+  ]
+
+  const setActiveTab = (id) => {
+    tabs.querySelectorAll('.settings-tab').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.tab === id)
+    })
+    panels.querySelectorAll('.settings-panel').forEach((panel) => {
+      panel.classList.toggle('active', panel.dataset.tab === id)
+    })
+  }
+
+  tabItems.forEach((tab) => {
+    const btn = document.createElement('button')
+    btn.className = 'settings-tab'
+    btn.type = 'button'
+    btn.dataset.tab = tab.id
+    btn.textContent = tab.label
+    btn.onclick = () => setActiveTab(tab.id)
+    tabs.appendChild(btn)
+  })
+
+  setActiveTab('appearance')
 
   const footer = document.createElement('div')
   footer.className = 'close-area'
@@ -860,7 +972,8 @@ function showSettingsModal(config) {
   
   footer.append(footerHint, doneBtn)
 
-  modal.append(header, scrollArea, footer)
+  body.append(tabs, panels)
+  modal.append(header, body, footer)
   overlay.appendChild(modal)
   document.body.appendChild(overlay)
   
@@ -878,6 +991,118 @@ function showSettingsModal(config) {
 ipcRenderer.on('open-settings-modal', (_, config) => {
   showSettingsModal(config)
 })
+
+let settingsEntryObserver = null
+
+function ensureSettingsEntryStyles() {
+  if (document.getElementById('unleashed-settings-entry-style')) return
+  const style = document.createElement('style')
+  style.id = 'unleashed-settings-entry-style'
+  style.textContent = `
+    #unleashed-settings-btn {
+      all: unset;
+      cursor: pointer;
+      width: 40px;
+      height: 40px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 6px auto;
+      color: #c6c8d1;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      transition: background 0.2s ease, transform 0.2s ease, color 0.2s ease;
+    }
+    #unleashed-settings-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      transform: translateY(-1px);
+    }
+    #unleashed-settings-btn[data-floating="true"] {
+      position: fixed;
+      left: 16px;
+      bottom: 20px;
+      z-index: 999999;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+    }
+    @media (prefers-color-scheme: light) {
+      #unleashed-settings-btn {
+        color: #4c4f59;
+        background: rgba(0, 0, 0, 0.04);
+        border: 1px solid rgba(0, 0, 0, 0.08);
+      }
+      #unleashed-settings-btn:hover {
+        background: rgba(0, 0, 0, 0.08);
+        color: #111;
+      }
+    }
+  `
+  document.head.appendChild(style)
+}
+
+function createSettingsButton() {
+  const btn = document.createElement('button')
+  btn.id = 'unleashed-settings-btn'
+  btn.type = 'button'
+  btn.setAttribute('aria-label', 'Unleashed Settings')
+  btn.innerHTML = `
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 8.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4Z" stroke="currentColor" stroke-width="1.6"/>
+      <path d="M19.4 12a7.4 7.4 0 0 0-.08-1.06l2.02-1.58-1.92-3.32-2.44.95a7.5 7.5 0 0 0-1.84-1.06l-.36-2.56h-3.84l-.36 2.56c-.66.24-1.28.6-1.84 1.06l-2.44-.95-1.92 3.32 2.02 1.58A7.4 7.4 0 0 0 4.6 12c0 .36.02.71.08 1.06l-2.02 1.58 1.92 3.32 2.44-.95c.56.46 1.18.82 1.84 1.06l.36 2.56h3.84l.36-2.56c.66-.24 1.28-.6 1.84-1.06l2.44.95 1.92-3.32-2.02-1.58c.06-.35.08-.7.08-1.06Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+    </svg>
+  `
+  btn.onclick = () => ipcRenderer.send('open-settings')
+  return btn
+}
+
+function findSettingsNavTarget() {
+  const navs = Array.from(document.querySelectorAll('div[role="navigation"]'))
+  if (!navs.length) return null
+
+  const marketplaceNav = navs.find((nav) =>
+    nav.querySelector('[aria-label*="Marketplace"], [aria-label*="marketplace"], a[href*="marketplace"]')
+  )
+  if (marketplaceNav) return marketplaceNav
+
+  const sized = navs
+    .map((nav) => ({
+      nav,
+      width: nav.getBoundingClientRect().width,
+      count: nav.querySelectorAll('a, button, [role="button"]').length
+    }))
+    .filter((item) => item.width > 0 && item.width < 130)
+    .sort((a, b) => b.count - a.count)
+
+  if (sized.length) return sized[0].nav
+  return null
+}
+
+function ensureSettingsEntry() {
+  if (document.getElementById('unleashed-settings-btn')) return
+  ensureSettingsEntryStyles()
+
+  const target = findSettingsNavTarget()
+  const btn = createSettingsButton()
+  if (target) {
+    btn.dataset.floating = 'false'
+    target.appendChild(btn)
+  } else {
+    btn.dataset.floating = 'true'
+    document.body.appendChild(btn)
+  }
+}
+
+function setupSettingsEntry() {
+  ensureSettingsEntry()
+  if (settingsEntryObserver) return
+  settingsEntryObserver = new MutationObserver(() => {
+    if (!document.getElementById('unleashed-settings-btn')) {
+      ensureSettingsEntry()
+    }
+  })
+  settingsEntryObserver.observe(document.body, { childList: true, subtree: true })
+}
 
 
 // visibility API override with safe, configurable getters
@@ -1222,6 +1447,7 @@ window.addEventListener('DOMContentLoaded', () => {
   setupClipboardSanitizer()
   setupKeywordAlerts()
   setupBackgroundDetection()
+  setupSettingsEntry()
   setupInvisibleInk() // Steganography
   setInterval(scrapeActiveChat, 2000)
 })

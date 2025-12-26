@@ -13,7 +13,8 @@
     "bump": "node scripts/bump.js"
   },
   "dependencies": {
-    "electron-store": "^8.1.0"
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "electron": "^33.2.1",
@@ -22,6 +23,13 @@
   "build": {
     "appId": "com.messenger.unleashed",
     "productName": "Messenger Unleashed",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "pcstyleorg",
+        "repo": "messenger-desktop"
+      }
+    ],
     "mac": {
       "category": "public.app-category.social-networking",
       "target": [

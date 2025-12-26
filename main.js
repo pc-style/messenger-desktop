@@ -6,13 +6,24 @@ const {
   ipcMain,
   Notification,
   dialog,
+  desktopCapturer,
   nativeImage,
   shell,
 } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const { spawn } = require("child_process");
 const { net } = require("electron");
 const Store = require("electron-store");
+
+let autoUpdater = null;
+if (process.platform === "win32") {
+  try {
+    ({ autoUpdater } = require("electron-updater"));
+  } catch (error) {
+    console.warn("[Unleashed] Auto-updater unavailable:", error.message);
+  }
+}
 
 let isAppQuiting = false;
 app.setName("Messenger Unleashed");
@@ -61,6 +72,7 @@ const store = new Store({
     customCSS: "",
     modernLook: false,
     floatingGlass: false,
+    androidBubbles: false,
     quietHoursEnabled: false,
     quietHoursStart: "22:00",
     quietHoursEnd: "07:00",
@@ -613,6 +625,125 @@ async function openInputDialog({
   });
 }
 
+async function openSelectionDialog({ title, message, options = [] }) {
+  if (!options.length) return null;
+
+  return new Promise((resolve) => {
+    const channel = `dialog-result-${Date.now()}-${Math.random()
+      .toString(16)
+      .slice(2)}`;
+
+    const estimatedHeight = Math.min(620, 220 + options.length * 36);
+    const selectionWindow = new BrowserWindow({
+      width: 520,
+      height: estimatedHeight,
+      parent: mainWindow || undefined,
+      modal: !!mainWindow,
+      show: false,
+      resizable: true,
+      minimizable: false,
+      maximizable: false,
+      autoHideMenuBar: true,
+      webPreferences: {
+        preload: path.join(__dirname, "dialog-preload.js"),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        additionalArguments: [`--dialog-channel=${channel}`],
+      },
+    });
+
+    const listMarkup = options
+      .map((option) => {
+        const label = escapeHTML(option.label || "Untitled");
+        const detail = option.detail
+          ? `<span class="detail">${escapeHTML(option.detail)}</span>`
+          : "";
+        return `
+          <button class="option" data-id="${escapeHTML(option.id)}">
+            <span class="label">${label}</span>
+            ${detail}
+          </button>
+        `;
+      })
+      .join("");
+
+    const html = `<!DOCTYPE html>
+      <html>
+      <head>
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';" />
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 16px; background: #1e1e1e; color: #f0f0f0; }
+          h3 { margin: 0 0 8px 0; font-size: 16px; }
+          p { margin: 0 0 12px 0; font-size: 13px; color: #b0b0b0; }
+          .options { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; padding-right: 4px; }
+          .option { text-align: left; border: 1px solid #3a3a3a; background: #252525; color: #f0f0f0; padding: 10px 12px; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+          .option:hover { border-color: #0084ff; background: #2c2c2c; }
+          .label { font-size: 13px; font-weight: 600; }
+          .detail { font-size: 11px; color: #9a9a9a; }
+          .buttons { margin-top: 14px; text-align: right; }
+          button.cancel { padding: 8px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; background: #444; color: #fff; }
+        </style>
+      </head>
+      <body>
+        <h3>${escapeHTML(title || "Select Source")}</h3>
+        <p>${escapeHTML(message || "Choose a screen or window to share.")}</p>
+        <div class="options">${listMarkup}</div>
+        <div class="buttons">
+          <button class="cancel" onclick="window.dialogAPI.cancel()">Cancel</button>
+        </div>
+        <script>
+          document.querySelectorAll('.option').forEach((btn) => {
+            btn.addEventListener('click', () => window.dialogAPI.submit(btn.dataset.id))
+          })
+          document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') window.dialogAPI.cancel()
+          })
+        </script>
+      </body>
+      </html>`;
+
+    ipcMain.once(channel, (_, value) => {
+      if (!selectionWindow.isDestroyed()) selectionWindow.close();
+      resolve(value ?? null);
+    });
+
+    selectionWindow.on("closed", () => {
+      resolve(null);
+    });
+
+    selectionWindow.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+    );
+
+    selectionWindow.once("ready-to-show", () => {
+      selectionWindow.show();
+    });
+  });
+}
+
+const THEME_OPTIONS = [
+  { id: "default", label: "Default" },
+  { id: "oled", label: "OLED Dark" },
+  { id: "nord", label: "Nord" },
+  { id: "dracula", label: "Dracula" },
+  { id: "solarized", label: "Solarized Dark" },
+  { id: "highcontrast", label: "High Contrast" },
+  { id: "alternative", label: "[EXP] Alternative Look" },
+  { id: "crimson", label: "Crimson" },
+  { id: "electriccrimson", label: "Electric Crimson" },
+  { id: "neoncoral", label: "Neon Coral" },
+  { id: "infernoorange", label: "Inferno Orange" },
+  { id: "solargold", label: "Solar Gold" },
+  { id: "acidlime", label: "Acid Lime" },
+  { id: "emeraldflash", label: "Emerald Flash" },
+  { id: "cyberteal", label: "Cyber Teal" },
+  { id: "electricblue", label: "Electric Blue" },
+  { id: "ultraviolet", label: "Ultraviolet" },
+  { id: "hotmagenta", label: "Hot Magenta" },
+  { id: "compact", label: "Compact Mode" },
+];
+
 // get platform-appropriate icon path
 function getIconPath() {
   const iconName =
@@ -706,6 +837,26 @@ function applyTheme(theme) {
 
   // Instant apply instead of full reload
   applyThemeCSS(theme);
+}
+
+function applyAndroidBubbles() {
+  if (!mainWindow) return;
+  const enabled = store.get("androidBubbles");
+  mainWindow.webContents.removeInsertedCSS("android-bubbles").catch(() => {});
+  if (!enabled) return;
+  const css = getThemeCSS("androidbubbles");
+  if (css) {
+    mainWindow.webContents
+      .insertCSS(css, { cssKey: "android-bubbles" })
+      .catch(() => {});
+  }
+}
+
+function toggleAndroidBubbles() {
+  const current = store.get("androidBubbles");
+  store.set("androidBubbles", !current);
+  applyAndroidBubbles();
+  updateMenu();
 }
 
 function toggleAlwaysOnTop() {
@@ -1251,6 +1402,7 @@ function pushRendererConfig() {
     clipboardSanitize: store.get("clipboardSanitize"),
     scheduleDelayMs: store.get("scheduleDelayMs"),
     blockTypingIndicator: store.get("blockTypingIndicator"),
+    androidBubbles: store.get("androidBubbles"),
   };
 
   mainWindow.webContents.send("update-config", config);
@@ -1416,70 +1568,263 @@ async function editCustomCSS() {
   }
 }
 
-async function checkForUpdates() {
-  const CURRENT_VERSION = app.getVersion();
-  const VERSION_URL =
-    "https://raw.githubusercontent.com/pcstyleorg/messenger-desktop/main/.version";
+const UPDATE_REPO = "pcstyleorg/messenger-desktop";
+const INSTALL_SCRIPT_URL =
+  process.env.MU_INSTALL_SCRIPT_URL ||
+  "https://raw.githubusercontent.com/pcstyleorg/messenger-desktop/main/install.sh";
 
-  try {
-    const request = net.request(VERSION_URL);
+let updateCheckInFlight = false;
+let lastUpdateCheckWasSilent = true;
+let windowsUpdaterReady = false;
+
+function normalizeVersion(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^v/i, "")
+    .split("-")[0];
+}
+
+function isNewerVersion(candidate, current) {
+  const a = normalizeVersion(candidate).split(".").map(Number);
+  const b = normalizeVersion(current).split(".").map(Number);
+  const max = Math.max(a.length, b.length);
+  for (let i = 0; i < max; i += 1) {
+    const left = a[i] || 0;
+    const right = b[i] || 0;
+    if (left > right) return true;
+    if (left < right) return false;
+  }
+  return false;
+}
+
+function requestText(url) {
+  return new Promise((resolve, reject) => {
+    const request = net.request({
+      method: "GET",
+      url,
+      headers: {
+        "User-Agent": `${app.getName()} (${process.platform})`,
+        "Accept": "application/vnd.github+json",
+      },
+    });
     request.on("response", (response) => {
       let data = "";
       response.on("data", (chunk) => {
         data += chunk;
       });
       response.on("end", () => {
-        const latestVersion = data.trim();
-        const normalize = (v) => v.replace(/^v/, "");
-        const normalizedLatest = normalize(latestVersion);
-        const normalizedCurrent = normalize(CURRENT_VERSION);
-        
-        // robust semver check
-        const isNewer = (v1, v2) => {
-          const p1 = v1.split('.').map(Number);
-          const p2 = v2.split('.').map(Number);
-          for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
-            const n1 = p1[i] || 0;
-            const n2 = p2[i] || 0;
-            if (n1 > n2) return true;
-            if (n1 < n2) return false;
-          }
-          return false;
-        };
-
-        if (
-          latestVersion &&
-          normalizedLatest !== normalizedCurrent &&
-          !latestVersion.startsWith("<!DOCTYPE") &&
-          isNewer(normalizedLatest, normalizedCurrent)
-        ) {
-          dialog
-            .showMessageBox(mainWindow, {
-              type: "info",
-              title: "Update Available",
-              message: `A new version (${latestVersion}) is available. Your current version is ${CURRENT_VERSION}.`,
-              buttons: ["Download and Update", "Later"],
-              defaultId: 0,
-            })
-            .then(({ response }) => {
-              if (response === 0) {
-                shell.openExternal(
-                  "https://github.com/pcstyleorg/messenger-desktop/releases"
-                );
-              }
-            });
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          resolve(data);
+        } else {
+          reject(
+            new Error(
+              `Request failed (${response.statusCode}) for ${url}`
+            )
+          );
         }
-        // Save local .version file
-        const versionPath = path.join(app.getPath("userData"), ".version");
-        fs.writeFileSync(versionPath, latestVersion || CURRENT_VERSION);
       });
     });
-    request.on("error", (err) => {
-      console.error("Update check failed:", err);
-    });
+    request.on("error", reject);
     request.end();
-  } catch (err) {
-    console.error("Update check request error:", err);
+  });
+}
+
+async function fetchLatestReleaseInfo() {
+  const url = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
+  const payload = await requestText(url);
+  const data = JSON.parse(payload);
+  const version = data.tag_name || data.name || "";
+  return {
+    version: normalizeVersion(version),
+    displayVersion: version || "",
+    url: data.html_url || `https://github.com/${UPDATE_REPO}/releases`,
+  };
+}
+
+function ensureWindowsAutoUpdater() {
+  if (!autoUpdater || windowsUpdaterReady) return;
+  windowsUpdaterReady = true;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("checking-for-update", () => {
+    if (!lastUpdateCheckWasSilent) {
+      console.log("[Unleashed] Checking for updates...");
+    }
+  });
+
+  autoUpdater.on("update-available", (info) => {
+    if (!lastUpdateCheckWasSilent) {
+      dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "Update Available",
+        message: `Downloading version ${info?.version || ""}...`,
+      });
+    }
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    if (!lastUpdateCheckWasSilent) {
+      dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "No Updates",
+        message: "You're already on the latest version.",
+      });
+    }
+  });
+
+  autoUpdater.on("error", (error) => {
+    console.error("[Unleashed] Auto-update error:", error);
+    if (!lastUpdateCheckWasSilent) {
+      dialog.showErrorBox(
+        "Update Error",
+        error?.message || "Update failed."
+      );
+    }
+  });
+
+  autoUpdater.on("update-downloaded", () => {
+    dialog
+      .showMessageBox(mainWindow, {
+        type: "info",
+        title: "Update Ready",
+        message: "Update downloaded. Restart to install?",
+        buttons: ["Restart Now", "Later"],
+        defaultId: 0,
+      })
+      .then(({ response }) => {
+        if (response === 0) {
+          autoUpdater.quitAndInstall();
+        }
+      });
+  });
+}
+
+async function runMacInstallScript() {
+  const script = await requestText(INSTALL_SCRIPT_URL);
+  if (!script.trim().startsWith("#!")) {
+    throw new Error("Installer script looks invalid.");
+  }
+
+  const tempDir = fs.mkdtempSync(
+    path.join(app.getPath("temp"), "messenger-update-")
+  );
+  const scriptPath = path.join(tempDir, "install.sh");
+  fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+
+  const command = `/bin/bash "${scriptPath.replace(/"/g, '\\"')}"`;
+  const osaScript = `do shell script ${JSON.stringify(
+    command
+  )} with administrator privileges`;
+
+  const child = spawn("osascript", ["-e", osaScript], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+
+  setTimeout(() => {
+    app.quit();
+  }, 1000);
+}
+
+async function checkForUpdatesMac({ silent }) {
+  if (process.platform !== "darwin") return;
+
+  if (!app.isPackaged) {
+    if (!silent) {
+      dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "Updates Disabled",
+        message: "Auto-updates only work in packaged builds.",
+      });
+    }
+    return;
+  }
+
+  try {
+    const currentVersion = app.getVersion();
+    const latest = await fetchLatestReleaseInfo();
+    if (latest?.version && isNewerVersion(latest.version, currentVersion)) {
+      const { response } = await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "Update Available",
+        message: `Version ${latest.displayVersion || latest.version} is available.`,
+        detail:
+          "The updater will download and install using the installer script, and the app will quit during install. You may be asked for your macOS password.",
+        buttons: ["Install Update", "Later"],
+        defaultId: 0,
+      });
+      if (response === 0) {
+        await runMacInstallScript();
+      }
+    } else if (!silent) {
+      dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "No Updates",
+        message: "You're already on the latest version.",
+      });
+    }
+  } catch (error) {
+    console.error("[Unleashed] Mac update check failed:", error);
+    if (!silent) {
+      dialog.showErrorBox(
+        "Update Error",
+        error?.message || "Update check failed."
+      );
+    }
+  }
+}
+
+async function checkForUpdatesWindows({ silent }) {
+  if (process.platform !== "win32") return;
+  if (!autoUpdater) {
+    if (!silent) {
+      dialog.showErrorBox(
+        "Updater Missing",
+        "Auto-updater is not available in this build."
+      );
+    }
+    return;
+  }
+
+  if (!app.isPackaged) {
+    if (!silent) {
+      dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "Updates Disabled",
+        message: "Auto-updates only work in packaged builds.",
+      });
+    }
+    return;
+  }
+
+  try {
+    ensureWindowsAutoUpdater();
+    await autoUpdater.checkForUpdates();
+  } catch (error) {
+    console.error("[Unleashed] Windows update check failed:", error);
+    if (!silent) {
+      dialog.showErrorBox(
+        "Update Error",
+        error?.message || "Update check failed."
+      );
+    }
+  }
+}
+
+async function checkForUpdates({ silent = true } = {}) {
+  if (updateCheckInFlight) return;
+  updateCheckInFlight = true;
+  lastUpdateCheckWasSilent = !!silent;
+  try {
+    if (process.platform === "win32") {
+      await checkForUpdatesWindows({ silent });
+    } else if (process.platform === "darwin") {
+      await checkForUpdatesMac({ silent });
+    }
+  } finally {
+    updateCheckInFlight = false;
   }
 }
 
@@ -1867,6 +2212,7 @@ function openSettingsUI() {
     doNotDisturb: store.get("doNotDisturb"),
     modernLook: store.get("modernLook"),
     floatingGlass: store.get("floatingGlass"),
+    androidBubbles: store.get("androidBubbles"),
     theme: store.get("theme"),
     windowOpacity: store.get("windowOpacity"),
     alwaysOnTop: store.get("alwaysOnTop"),
@@ -1932,6 +2278,9 @@ ipcMain.on("update-setting", (event, { key, value }) => {
       applyModernLook();
       applyFloatingGlass();
       break;
+    case "androidBubbles":
+      applyAndroidBubbles();
+      break;
     case "alwaysOnTop":
       mainWindow.setAlwaysOnTop(value);
       break;
@@ -1960,6 +2309,22 @@ ipcMain.on("edit-quick-replies", () => {
 
 ipcMain.on("edit-quiet-hours", () => {
   editQuietHours({ reopenSettings: true });
+});
+
+ipcMain.on("open-settings", () => {
+  openSettingsUI();
+});
+
+ipcMain.on("pick-theme", async () => {
+  if (!mainWindow) return;
+  const choice = await openSelectionDialog({
+    title: "Choose Theme",
+    message: "Select a theme for Messenger Unleashed.",
+    options: THEME_OPTIONS,
+  });
+  if (choice) {
+    applyTheme(choice);
+  }
 });
 
 // IPC handler for CSS input result
@@ -2256,6 +2621,7 @@ function updateMenu() {
   const expTypingOverlay = store.get("expTypingOverlay");
   const windowOpacity = store.get("windowOpacity");
   const customCSS = store.get("customCSS");
+  const androidBubbles = store.get("androidBubbles");
   const quietHoursEnabled = store.get("quietHoursEnabled");
   const quietHoursStart = store.get("quietHoursStart");
   const quietHoursEnd = store.get("quietHoursEnd");
@@ -2267,6 +2633,10 @@ function updateMenu() {
       label: app.name,
       submenu: [
         { role: "about" },
+        {
+          label: "Check for Updates...",
+          click: () => checkForUpdates({ silent: false }),
+        },
         { type: "separator" },
         { role: "hide" },
         { role: "hideOthers" },
@@ -2390,6 +2760,12 @@ function updateMenu() {
                   checked: theme === "highcontrast",
                   click: () => applyTheme("highcontrast"),
                 },
+                {
+                  label: "[EXP] Alternative Look",
+                  type: "radio",
+                  checked: theme === "alternative",
+                  click: () => applyTheme("alternative"),
+                },
                 { type: "separator" },
                 {
                   label: "Vibrant Colors",
@@ -2482,6 +2858,12 @@ function updateMenu() {
               type: "checkbox",
               checked: store.get("floatingGlass"),
               click: toggleFloatingGlass,
+            },
+            {
+              label: "[EXP] Android Bubbles",
+              type: "checkbox",
+              checked: androidBubbles,
+              click: toggleAndroidBubbles,
             },
             {
               label: "Focus Mode",
@@ -2684,6 +3066,104 @@ function updateMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+function ensureMainWindowVisible() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+    mainWindow.focus();
+    if (chatHeadWindow && !chatHeadWindow.isDestroyed()) {
+      chatHeadWindow.hide();
+    }
+    return;
+  }
+  if (!isAppQuiting) {
+    createWindow();
+  }
+}
+
+function restoreMainWindowAfterClose(closedWindow) {
+  if (isAppQuiting) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (closedWindow === mainWindow) return;
+
+  const otherVisible = BrowserWindow.getAllWindows().some(
+    (win) => win !== mainWindow && win.isVisible()
+  );
+
+  if (!otherVisible && !mainWindow.isVisible()) {
+    ensureMainWindowVisible();
+  }
+}
+
+function isTrustedDisplayOrigin(origin) {
+  if (!origin || typeof origin !== "string") return false;
+  try {
+    const url = new URL(origin);
+    const host = url.hostname.toLowerCase();
+    return (
+      host === "www.messenger.com" ||
+      host.endsWith(".messenger.com") ||
+      host === "www.facebook.com" ||
+      host.endsWith(".facebook.com")
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function extractRequestOrigin(request) {
+  return (
+    request?.origin ||
+    request?.securityOrigin ||
+    request?.requestingOrigin ||
+    request?.embeddingOrigin ||
+    request?.frame?.url ||
+    ""
+  );
+}
+
+async function pickDisplaySource() {
+  const sources = await desktopCapturer.getSources({
+    types: ["screen", "window"],
+    thumbnailSize: { width: 320, height: 200 },
+    fetchWindowIcons: true,
+  });
+
+  if (!sources.length) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const message =
+        process.platform === "darwin"
+          ? "No screens are available. On macOS, enable Screen Recording permission for Messenger Unleashed in System Settings > Privacy & Security > Screen Recording, then relaunch the app."
+          : "No screens are available for capture. Please retry and ensure screen sharing is allowed by your system.";
+      dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "Screen Sharing Unavailable",
+        message,
+      });
+    }
+    return null;
+  }
+
+  const options = sources.map((source) => ({
+    id: source.id,
+    label: source.name || "Untitled",
+    detail: source.id.startsWith("screen:") ? "Screen" : "Window",
+  }));
+
+  const choice = await openSelectionDialog({
+    title: "Share your screen",
+    message: "Choose a screen or window to share with Messenger.",
+    options,
+  });
+
+  if (!choice) return null;
+  return sources.find((source) => source.id === choice) || null;
+}
+
 function createWindow() {
   const bounds = store.get("windowBounds");
   const debugWebSocketFrames = process.env.DEBUG_REQUEST_BLOCKER_WS === "1";
@@ -2718,6 +3198,7 @@ function createWindow() {
     (webContents, permission, callback) => {
       const allowedPermissions = [
         "media",
+        "display-capture",
         "mediaKeySystem",
         "geolocation",
         "notifications",
@@ -2732,6 +3213,7 @@ function createWindow() {
     (webContents, permission) => {
       const allowedPermissions = [
         "media",
+        "display-capture",
         "mediaKeySystem",
         "geolocation",
         "notifications",
@@ -2740,6 +3222,29 @@ function createWindow() {
       ];
       return allowedPermissions.includes(permission);
     }
+  );
+
+  session.defaultSession.setDisplayMediaRequestHandler(
+    async (request, callback) => {
+      const origin = extractRequestOrigin(request);
+      if (!isTrustedDisplayOrigin(origin)) {
+        callback({ video: null });
+        return;
+      }
+
+      try {
+        const source = await pickDisplaySource();
+        if (!source) {
+          callback({ video: null });
+          return;
+        }
+        callback({ video: source });
+      } catch (error) {
+        console.error("[Unleashed] Display media request failed:", error);
+        callback({ video: null });
+      }
+    },
+    { useSystemPicker: process.platform === "darwin" }
   );
 
   // apply request blockers before loading content (read receipts + typing indicator)
@@ -2828,6 +3333,7 @@ function createWindow() {
     }
 
     applyCustomCSS();
+    applyAndroidBubbles();
     pushRendererConfig();
 
     // send initial feature states to preload
@@ -2875,6 +3381,18 @@ function createWindow() {
     }
   });
 
+  mainWindow.on("show", () => {
+    if (chatHeadWindow) {
+      chatHeadWindow.hide();
+    }
+  });
+
+  mainWindow.on("hide", () => {
+    if (activeChatInfo && activeChatInfo.src) {
+      createChatHead();
+    }
+  });
+
   mainWindow.on("resize", () => {
     const { width, height } = mainWindow.getBounds();
     store.set("windowBounds", { width, height });
@@ -2884,6 +3402,9 @@ function createWindow() {
     if (!isAppQuiting) {
       event.preventDefault();
       mainWindow.hide();
+      if (activeChatInfo && activeChatInfo.src) {
+        createChatHead();
+      }
     }
     return false;
   });
@@ -2913,6 +3434,12 @@ function createWindow() {
 
 app.on("ready", () => {
   registerGlobalShortcuts();
+});
+
+app.on("browser-window-created", (event, window) => {
+  window.on("closed", () => {
+    restoreMainWindowAfterClose(window);
+  });
 });
 
 function registerGlobalShortcuts() {
@@ -2965,9 +3492,7 @@ app.whenReady().then(() => {
   checkForUpdates();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    ensureMainWindowVisible();
   });
 });
 

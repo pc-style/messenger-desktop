@@ -211,3 +211,161 @@ div[role="none"][data-testid="message-container-outgoing"] > div > div[dir="auto
 /* hotmagenta */
 div[role="none"][data-testid="message-container-outgoing"] > div > div[dir="auto"] { background-color: #ff80ab !important; color: #fff !important; }
 ::-webkit-scrollbar-thumb { background: #ff80ab !important; }
+
+/* alternative */
+:root {
+  color-scheme: dark;
+  --alt-bg: #14151a;
+  --alt-panel: #1c1e23;
+  --alt-panel-2: #20232a;
+  --alt-border: rgba(255, 255, 255, 0.06);
+  --alt-text: #e7e9ee;
+  --alt-muted: #9aa0ad;
+  --alt-accent: #6c63ff;
+  --alt-accent-soft: rgba(108, 99, 255, 0.18);
+}
+
+body {
+  font-family: "Manrope", "Avenir Next", "Segoe UI", sans-serif !important;
+  color: var(--alt-text) !important;
+}
+
+html,
+body,
+div[role="main"],
+div[role="navigation"],
+div[role="complementary"],
+div[aria-label="Chats"],
+div[role="banner"] {
+  background-color: var(--alt-bg) !important;
+}
+
+/* Left icon rail */
+div[role="navigation"]:first-of-type,
+div[aria-label="Messenger"] > div > div:first-child {
+  background-color: #1a1c20 !important;
+  border-right: 1px solid var(--alt-border) !important;
+}
+
+div[role="navigation"] a,
+div[role="navigation"] div[role="button"] {
+  border-radius: 14px !important;
+  margin: 6px 8px !important;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+div[role="navigation"] a[aria-current="page"],
+div[role="navigation"] div[aria-current="page"],
+div[role="navigation"] div[aria-selected="true"] {
+  background-color: var(--alt-accent-soft) !important;
+  color: #cfcfff !important;
+}
+
+/* Chat list panel */
+div[aria-label="Chats"] {
+  background-color: var(--alt-panel) !important;
+  border-right: 1px solid var(--alt-border) !important;
+}
+
+div[aria-label="Chats"] > div {
+  background-color: transparent !important;
+}
+
+div[aria-label="Chats"] input {
+  background-color: #121318 !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--alt-border) !important;
+  color: var(--alt-text) !important;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.25) !important;
+}
+
+div[aria-label="Chats"] input::placeholder {
+  color: var(--alt-muted) !important;
+}
+
+div[aria-label="Chats"] [role="row"],
+div[aria-label="Chats"] [role="listitem"],
+div[aria-label="Chats"] [role="gridcell"],
+div[aria-label="Chats"] a {
+  border-radius: 16px !important;
+  margin: 4px 10px !important;
+  padding: 10px 12px !important;
+  background-color: transparent !important;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+div[aria-label="Chats"] a[aria-current="page"],
+div[aria-label="Chats"] [aria-selected="true"] {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.25) !important;
+}
+
+div[aria-label="Chats"] a:hover,
+div[aria-label="Chats"] [role="row"]:hover,
+div[aria-label="Chats"] [role="listitem"]:hover {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Main conversation area */
+div[role="main"] {
+  background-color: #17181d !important;
+}
+
+div[aria-label="Messages"] {
+  background: #17181d !important;
+}
+
+div[role="banner"] {
+  background-color: rgba(23, 24, 29, 0.92) !important;
+  border-bottom: 1px solid var(--alt-border) !important;
+  backdrop-filter: blur(12px);
+}
+
+div[role="complementary"] {
+  background-color: var(--alt-panel) !important;
+  border-left: 1px solid var(--alt-border) !important;
+}
+
+/* Message bubbles */
+div[role="none"] > div > div[dir="auto"] {
+  background-color: #2a2d33 !important;
+  color: var(--alt-text) !important;
+  border-radius: 18px !important;
+  padding: 8px 12px !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18) !important;
+}
+
+div[role="none"][data-testid="message-container-outgoing"] > div > div[dir="auto"] {
+  background: linear-gradient(135deg, #6c63ff, #7f73ff) !important;
+  color: #fff !important;
+  box-shadow: 0 10px 22px rgba(108, 99, 255, 0.35) !important;
+}
+
+div[role="textbox"] {
+  background-color: var(--alt-panel-2) !important;
+  border-radius: 20px !important;
+  border: 1px solid var(--alt-border) !important;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #353843;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #434756;
+}
+
+/* androidbubbles */
+div[role="none"] > div > div[dir="auto"] {
+  border-radius: 18px 18px 18px 6px !important;
+  padding: 8px 12px !important;
+}
+div[role="none"][data-testid="message-container-outgoing"] > div > div[dir="auto"] {
+  border-radius: 18px 18px 6px 18px !important;
+}
