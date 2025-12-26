@@ -116,6 +116,12 @@ const MAC_INSTALL_CMD =
 
 export default function HomeClient({ version }: { version: string }) {
   const [copied, setCopied] = useState(false);
+  const normalizedVersion = (version || "").trim();
+  const cleanVersion = normalizedVersion.replace(/^v/i, "");
+  const windowsSetupUrl =
+    cleanVersion && /^[0-9]/.test(cleanVersion)
+      ? `https://github.com/pcstyleorg/messenger-desktop/releases/download/v${cleanVersion}/Messenger.Unleashed.Setup.${cleanVersion}.exe`
+      : URLS.releases;
 
   useEffect(() => {
     // Intersection Observer for scroll animations
@@ -162,7 +168,9 @@ export default function HomeClient({ version }: { version: string }) {
       {/* Navigation */}
       <nav className={styles.nav}>
         <a href="#" className={styles.logo}>
-          <div className={styles.logoIcon}>{Icons.bolt}</div>
+          <div className={styles.logoIcon}>
+            <Image src="/app-icon.png" alt="Messenger Unleashed" width={36} height={36} className={styles.logoImage} />
+          </div>
           Messenger Unleashed
         </a>
         <ul className={styles.navLinks}>
@@ -204,7 +212,7 @@ export default function HomeClient({ version }: { version: string }) {
               {Icons.apple}
               Install on macOS
             </a>
-            <a href={URLS.releases} target="_blank" rel="noopener noreferrer" className={`${styles.btn} ${styles.btnSecondary}`}>
+            <a href={windowsSetupUrl} target="_blank" rel="noopener noreferrer" className={`${styles.btn} ${styles.btnSecondary}`}>
               {Icons.windows}
               Download for Windows
             </a>
@@ -441,7 +449,7 @@ export default function HomeClient({ version }: { version: string }) {
               </span>
             </div>
 
-            <a href={URLS.releases} target="_blank" rel="noopener noreferrer" className={styles.downloadBtn}>
+            <a href={windowsSetupUrl} target="_blank" rel="noopener noreferrer" className={`${styles.downloadBtn} ${styles.downloadBtnSmall}`}>
               {Icons.windows}
               <div className={styles.downloadBtnText}>
                 <span className={styles.downloadBtnLabel}>Download for</span>
@@ -461,7 +469,9 @@ export default function HomeClient({ version }: { version: string }) {
       <footer className={styles.footer}>
         <div className={styles.footerLeft}>
           <div className={styles.footerLogo}>
-            <div className={styles.footerLogoIcon}>{Icons.bolt}</div>
+            <div className={styles.footerLogoIcon}>
+              <Image src="/app-icon.png" alt="Messenger Unleashed" width={28} height={28} />
+            </div>
             Messenger Unleashed
           </div>
           <ul className={styles.footerLinks}>

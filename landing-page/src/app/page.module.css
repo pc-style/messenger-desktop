@@ -22,19 +22,21 @@
 }
 
 .logoIcon {
-  width: 32px;
-  height: 32px;
-  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-magenta));
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  background: #0f131b;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
-.logoIcon svg {
-  width: 18px;
-  height: 18px;
-  color: var(--bg-deep);
+.logoImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .navLinks {
@@ -54,22 +56,23 @@
 }
 
 .navCta {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border);
-  padding: 0.6rem 1.2rem;
-  border-radius: 8px;
-  font-size: 0.85rem;
-  font-weight: 500;
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-magenta));
+  border: 0;
+  padding: 0.75rem 1.4rem;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #0b0d12;
   transition: all 0.2s;
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  box-shadow: 0 14px 30px rgba(75, 183, 255, 0.25);
 }
 
 .navCta:hover {
-  background: var(--accent-magenta);
-  color: #141414;
-  border-color: var(--accent-magenta);
+  transform: translateY(-1px);
+  box-shadow: 0 18px 36px rgba(245, 160, 74, 0.35);
 }
 
 /* Hero Section */
@@ -107,12 +110,15 @@
   gap: 0.5rem;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  padding: 0.4rem 0.8rem;
-  border-radius: 100px;
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
   font-size: 0.75rem;
   color: var(--text-secondary);
   width: fit-content;
   margin-bottom: 2rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: visible;
 }
 
 .badgeDot {
@@ -177,10 +183,10 @@
   display: inline-flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 1rem 1.8rem;
-  border-radius: 10px;
+  padding: 1rem 2rem;
+  border-radius: 14px;
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 1rem;
   transition: all 0.25s;
   cursor: pointer;
   border: none;
@@ -188,24 +194,26 @@
 }
 
 .btnPrimary {
-  background: var(--accent-cyan);
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-magenta));
   color: #0b0d12;
+  box-shadow: 0 18px 40px rgba(75, 183, 255, 0.25);
 }
 
 .btnPrimary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 40px var(--glow-cyan);
+  box-shadow: 0 22px 48px rgba(245, 160, 74, 0.35);
 }
 
 .btnSecondary {
-  background: transparent;
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   color: var(--text-primary);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
 }
 
 .btnSecondary:hover {
-  background: var(--bg-elevated);
-  border-color: var(--text-muted);
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 /* Hero Visual */
@@ -570,18 +578,19 @@
   display: flex;
   align-items: center;
   gap: 1rem;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 1.25rem 2rem;
-  border-radius: 12px;
+  border-radius: 16px;
   transition: all 0.3s;
   justify-content: center;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
 }
 
 .downloadBtn:hover {
   border-color: var(--accent-cyan);
   transform: translateY(-3px);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 24px 48px rgba(75, 183, 255, 0.25);
 }
 
 .downloadBtn svg {
@@ -604,15 +613,34 @@
   font-size: 1.1rem;
 }
 
+.downloadBtnSmall {
+  padding: 0.8rem 1.4rem;
+  border-radius: 14px;
+  gap: 0.75rem;
+  align-self: center;
+  justify-self: center;
+  min-width: 220px;
+}
+
+.downloadBtnSmall svg {
+  width: 24px;
+  height: 24px;
+}
+
+.downloadBtnSmall .downloadBtnPlatform {
+  font-size: 1rem;
+}
+
 .installCard {
-  background: linear-gradient(135deg, rgba(75, 183, 255, 0.12), rgba(245, 160, 74, 0.12));
-  border: 1px solid var(--border);
+  background: linear-gradient(135deg, rgba(75, 183, 255, 0.18), rgba(245, 160, 74, 0.18));
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 16px;
   padding: 1.5rem;
   text-align: left;
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.35);
 }
 
 .installHeader {
@@ -647,7 +675,7 @@
 
 .installCmd {
   background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   padding: 0.75rem 1rem;
   display: flex;
@@ -666,7 +694,7 @@
 
 .copyBtn {
   border: none;
-  background: var(--accent-cyan);
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-magenta));
   color: #0b0d12;
   font-weight: 600;
   padding: 0.45rem 0.9rem;
@@ -677,7 +705,7 @@
 
 .copyBtn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 10px 20px rgba(75, 183, 255, 0.25);
+  box-shadow: 0 12px 24px rgba(245, 160, 74, 0.35);
 }
 
 .installNote {
@@ -726,19 +754,21 @@
 }
 
 .footerLogoIcon {
-  width: 24px;
-  height: 24px;
-  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-magenta));
-  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  background: #0f131b;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
-.footerLogoIcon svg {
-  width: 12px;
-  height: 12px;
-  color: var(--bg-deep);
+.footerLogoIcon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .footerLinks {
