@@ -5,7 +5,7 @@ import { appState } from "./state.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DIALOG_PRELOAD = path.join(__dirname, "../preload/dialog.js");
+const DIALOG_PRELOAD = path.join(__dirname, "../preload/dialog.cjs");
 
 function escapeHTML(value: string) {
   return (value || "")

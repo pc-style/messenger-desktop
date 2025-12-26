@@ -2601,7 +2601,7 @@ function createWindow() {
     title: "Messenger Unleashed",
     alwaysOnTop: store.get("alwaysOnTop"),
     webPreferences: {
-      preload: path.join(__dirname, "../preload/index.js"),
+      preload: path.join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: store.get("spellCheck"),

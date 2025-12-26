@@ -5,7 +5,7 @@ import { appState, store } from "./state.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const CHAT_HEAD_PRELOAD = path.join(__dirname, "../preload/chat-head.js");
+const CHAT_HEAD_PRELOAD = path.join(__dirname, "../preload/chat-head.cjs");
 
 let chatHeadWindow: BrowserWindow | null = null;
 let activeChatInfo: { src?: string } | null = null;
