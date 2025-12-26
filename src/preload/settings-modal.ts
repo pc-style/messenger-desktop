@@ -162,7 +162,7 @@ function showSettingsModal(config: any) {
   mainTitle.style.cssText = `margin: 0; font-size: 20px; font-weight: 700; color: ${textColor};`
 
   subTitle = document.createElement("div")
-  subTitle.textContent = `v${config.version || "2.0.3"} — Settings`
+  subTitle.textContent = `v${config.version || "2.0.4"} — Settings`
   subTitle.style.cssText = `font-size: 12px; color: ${subTextColor}; font-weight: 500; margin-top: 2px;`
 
   titleGroup.append(mainTitle, subTitle)
