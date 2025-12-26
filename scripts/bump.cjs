@@ -4,7 +4,7 @@ const path = require('path');
 const type = process.argv[2] || 'patch';
 const pkgPath = path.join(__dirname, '..', 'package.json');
 const versionPath = path.join(__dirname, '..', '.version');
-const preloadPath = path.join(__dirname, '..', 'preload.js');
+const preloadPath = path.join(__dirname, '..', 'src', 'preload', 'settings-modal.ts');
 
 if (!['patch', 'minor', 'major'].includes(type)) {
   console.error('Invalid bump type. Use patch, minor, or major.');
@@ -30,13 +30,15 @@ fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
 // Update .version
 fs.writeFileSync(versionPath, `v${newVersion}\n`);
 
-// Update preload.js
+// Update settings-modal.ts fallback version
 let preloadContent = fs.readFileSync(preloadPath, 'utf8');
-const versionRegex = /subTitle\.textContent = 'v\d+\.\d+\.\d+ — Settings'/;
-const newPreloadStr = `subTitle.textContent = 'v${newVersion} — Settings'`;
+const fallbackRegex = /config\.version \|\| "(\d+\.\d+\.\d+)"/;
 
-if (versionRegex.test(preloadContent)) {
-  preloadContent = preloadContent.replace(versionRegex, newPreloadStr);
+if (fallbackRegex.test(preloadContent)) {
+  preloadContent = preloadContent.replace(
+    fallbackRegex,
+    `config.version || "${newVersion}"`
+  );
   fs.writeFileSync(preloadPath, preloadContent);
 }
 

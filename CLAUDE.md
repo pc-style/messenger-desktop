@@ -27,11 +27,11 @@ bun run build:win
 
 ### Core Files (3 files total)
 
-- **main.js** (650+ lines) - Main Electron process, all app logic
-- **preload.js** - Security bridge for notifications
+- **src/main/index.ts** - Main Electron process, all app logic
+- **src/preload/index.ts** - Security bridge for notifications
 - **themes.css** - CSS definitions for OLED and Compact themes
 
-### Main Process Architecture (main.js)
+### Main Process Architecture (src/main/index.ts)
 
 The entire application is structured as a single main process file with:
 
@@ -62,9 +62,9 @@ The entire application is structured as a single main process file with:
 ### Notification System
 
 Uses a two-step bridge for native notifications:
-1. **preload.js** exposes `window.electronNotify` to renderer
+1. **src/preload/index.ts** exposes `window.electronNotify` to renderer
 2. Overrides `window.Notification` constructor to intercept Messenger notifications
-3. **main.js** handles IPC `show-notification` events
+3. **src/main/index.ts** handles IPC `show-notification` events
 4. Respects Do Not Disturb setting
 
 ### Theme System
@@ -89,7 +89,7 @@ Uses a two-step bridge for native notifications:
 
 ### Adding New Features
 
-1. Add setting to store defaults (main.js:6-23)
+1. Add setting to store defaults (src/main/state.ts)
 2. Create `toggle[FeatureName]()` function
 3. Add to `updateMenu()` - read setting and create menu item
 4. If persistent, apply in `did-finish-load` event handler

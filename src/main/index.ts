@@ -1,31 +1,30 @@
-const {
+import {
   app,
   BrowserWindow,
   session,
   Menu,
+  type MenuItemConstructorOptions,
   ipcMain,
   Notification,
   dialog,
   desktopCapturer,
   nativeImage,
   shell,
-} = require("electron");
-const path = require("path");
-const fs = require("fs");
-const { spawn } = require("child_process");
-const { net } = require("electron");
-const Store = require("electron-store");
+  globalShortcut,
+  Tray,
+} from "electron";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { appState, store } from "./state.js";
+import { openInputDialog, openSelectionDialog } from "./dialogs.js";
+import { applyAndroidBubbles, applyThemeCSS, THEME_OPTIONS } from "./themes.js";
+import { checkForUpdates } from "./updates.js";
+import { hideChatHead, initChatHeadIPC, showChatHeadIfAvailable } from "./chat-head.js";
 
-let autoUpdater = null;
-if (process.platform === "win32") {
-  try {
-    ({ autoUpdater } = require("electron-updater"));
-  } catch (error) {
-    console.warn("[Unleashed] Auto-updater unavailable:", error.message);
-  }
-}
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-let isAppQuiting = false;
 app.setName("Messenger Unleashed");
 
 const gotTheLock = app.requestSingleInstanceLock();
@@ -42,52 +41,7 @@ if (!gotTheLock) {
   });
 }
 
-const store = new Store({
-  defaults: {
-    alwaysOnTop: false,
-    theme: "default",
-    doNotDisturb: false,
-    windowBounds: { width: 1200, height: 800 },
-    launchAtLogin: false,
-    focusMode: false,
-    quickReplies: [
-      { key: "1", text: "On my way!" },
-      { key: "2", text: "Be right back" },
-      { key: "3", text: "Sounds good!" },
-      { key: "4", text: "Can we talk later?" },
-      { key: "5", text: "Thanks!" },
-      { key: "6", text: "Let me check and get back to you." },
-    ],
-    menuBarMode: false,
-    blockReadReceipts: false,
-    blockActiveStatus: false,
-    spellCheck: true,
-    keywordAlerts: ["urgent", "asap"],
-    keywordAlertsEnabled: true,
-    clipboardSanitize: true,
-    scheduleDelayMs: 30000,
-    blockTypingIndicator: false,
-    expTypingOverlay: false,
-    windowOpacity: 1.0,
-    customCSS: "",
-    modernLook: false,
-    floatingGlass: false,
-    androidBubbles: false,
-    quietHoursEnabled: false,
-    quietHoursStart: "22:00",
-    quietHoursEnd: "07:00",
-    quietHoursApplied: false,
-    shortcuts: {
-      "toggleAlwaysOnTop": "CmdOrCtrl+Shift+T",
-      "toggleDoNotDisturb": "CmdOrCtrl+Shift+D",
-      "toggleFocusMode": "CmdOrCtrl+Shift+F",
-      "createPipWindow": "CmdOrCtrl+Shift+P",
-      "focusSearch": "CmdOrCtrl+K",
-      "scheduleSendNow": "CmdOrCtrl+Alt+Enter",
-      "bossKey": "CmdOrCtrl+Shift+B"
-    }
-  },
-});
+initChatHeadIPC();
 
 if (process.platform === 'win32') {
   app.setAppUserModelId(app.name);
@@ -96,12 +50,14 @@ if (process.platform === 'win32') {
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-let mainWindow = null;
-let pipWindow = null;
-let tray = null;
+let mainWindow: BrowserWindow | null = null;
+let pipWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 let unreadCount = 0;
-let typingBlockerHandler = null;
-let quietHoursTimer = null;
+let typingBlockerHandler: ((details: any, callback: any) => void) | null = null;
+let quietHoursTimer: NodeJS.Timeout | null = null;
+let shortcutsRegistered = false;
+let shortcutsDirty = true;
 
 // combine uploaded body buffers into string
 function getRequestBody(details) {
@@ -519,231 +475,11 @@ function updateTypingBlocker(enabled) {
   updateRequestBlocker();
 }
 
-function escapeHTML(value) {
-  return (value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 function isSafeCSS(css) {
   const dangerous =
     /<script|javascript:|expression\s*\(|@import\s+url|behavior\s*:/i;
   return !dangerous.test(css);
 }
-
-async function openInputDialog({
-  title,
-  message,
-  defaultValue = "",
-  multiline = false,
-}) {
-  return new Promise((resolve) => {
-    const channel = `dialog-result-${Date.now()}-${Math.random()
-      .toString(16)
-      .slice(2)}`;
-
-    const inputWindow = new BrowserWindow({
-      width: 420,
-      height: multiline ? 320 : 220,
-      parent: mainWindow || undefined,
-      modal: !!mainWindow,
-      show: false,
-      resizable: false,
-      minimizable: false,
-      maximizable: false,
-      autoHideMenuBar: true,
-      webPreferences: {
-        preload: path.join(__dirname, "dialog-preload.js"),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        additionalArguments: [`--dialog-channel=${channel}`],
-      },
-    });
-
-    const html = `<!DOCTYPE html>
-      <html>
-      <head>
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';" />
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 16px; background: #1e1e1e; color: #f0f0f0; }
-          h3 { margin: 0 0 8px 0; font-size: 16px; }
-          p { margin: 0 0 12px 0; font-size: 13px; color: #b0b0b0; }
-          input, textarea { width: 100%; padding: 10px; box-sizing: border-box; border-radius: 6px; border: 1px solid #3a3a3a; background: #2a2a2a; color: #fff; font-size: 13px; }
-          textarea { height: 140px; resize: vertical; }
-          .buttons { margin-top: 14px; text-align: right; }
-          button { padding: 8px 14px; margin-left: 8px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
-          .cancel { background: #444; color: #fff; }
-          .ok { background: #0084ff; color: #fff; }
-        </style>
-      </head>
-      <body>
-        <h3>${escapeHTML(title || "Input")}</h3>
-        <p>${escapeHTML(message || "Enter a value:")}</p>
-        ${
-          multiline
-            ? `<textarea id="input">${escapeHTML(defaultValue)}</textarea>`
-            : `<input type="text" id="input" value="${escapeHTML(
-                defaultValue
-              )}" />`
-        }
-        <div class="buttons">
-          <button class="cancel" onclick="window.dialogAPI.cancel()">Cancel</button>
-          <button class="ok" onclick="window.dialogAPI.submit(document.getElementById('input').value)">OK</button>
-        </div>
-        <script>
-          const input = document.getElementById('input');
-          input.focus();
-          input.select();
-          input.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') window.dialogAPI.cancel();
-            if (!${multiline} && e.key === 'Enter') window.dialogAPI.submit(input.value);
-          });
-        </script>
-      </body>
-      </html>`;
-
-    ipcMain.once(channel, (_, value) => {
-      if (!inputWindow.isDestroyed()) inputWindow.close();
-      resolve(value ?? null);
-    });
-
-    inputWindow.on("closed", () => {
-      resolve(null);
-    });
-
-    inputWindow.loadURL(
-      `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
-    );
-
-    inputWindow.once("ready-to-show", () => {
-      inputWindow.show();
-    });
-  });
-}
-
-async function openSelectionDialog({ title, message, options = [] }) {
-  if (!options.length) return null;
-
-  return new Promise((resolve) => {
-    const channel = `dialog-result-${Date.now()}-${Math.random()
-      .toString(16)
-      .slice(2)}`;
-
-    const estimatedHeight = Math.min(620, 220 + options.length * 36);
-    const selectionWindow = new BrowserWindow({
-      width: 520,
-      height: estimatedHeight,
-      parent: mainWindow || undefined,
-      modal: !!mainWindow,
-      show: false,
-      resizable: true,
-      minimizable: false,
-      maximizable: false,
-      autoHideMenuBar: true,
-      webPreferences: {
-        preload: path.join(__dirname, "dialog-preload.js"),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        additionalArguments: [`--dialog-channel=${channel}`],
-      },
-    });
-
-    const listMarkup = options
-      .map((option) => {
-        const label = escapeHTML(option.label || "Untitled");
-        const detail = option.detail
-          ? `<span class="detail">${escapeHTML(option.detail)}</span>`
-          : "";
-        return `
-          <button class="option" data-id="${escapeHTML(option.id)}">
-            <span class="label">${label}</span>
-            ${detail}
-          </button>
-        `;
-      })
-      .join("");
-
-    const html = `<!DOCTYPE html>
-      <html>
-      <head>
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';" />
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 16px; background: #1e1e1e; color: #f0f0f0; }
-          h3 { margin: 0 0 8px 0; font-size: 16px; }
-          p { margin: 0 0 12px 0; font-size: 13px; color: #b0b0b0; }
-          .options { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; padding-right: 4px; }
-          .option { text-align: left; border: 1px solid #3a3a3a; background: #252525; color: #f0f0f0; padding: 10px 12px; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
-          .option:hover { border-color: #0084ff; background: #2c2c2c; }
-          .label { font-size: 13px; font-weight: 600; }
-          .detail { font-size: 11px; color: #9a9a9a; }
-          .buttons { margin-top: 14px; text-align: right; }
-          button.cancel { padding: 8px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; background: #444; color: #fff; }
-        </style>
-      </head>
-      <body>
-        <h3>${escapeHTML(title || "Select Source")}</h3>
-        <p>${escapeHTML(message || "Choose a screen or window to share.")}</p>
-        <div class="options">${listMarkup}</div>
-        <div class="buttons">
-          <button class="cancel" onclick="window.dialogAPI.cancel()">Cancel</button>
-        </div>
-        <script>
-          document.querySelectorAll('.option').forEach((btn) => {
-            btn.addEventListener('click', () => window.dialogAPI.submit(btn.dataset.id))
-          })
-          document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') window.dialogAPI.cancel()
-          })
-        </script>
-      </body>
-      </html>`;
-
-    ipcMain.once(channel, (_, value) => {
-      if (!selectionWindow.isDestroyed()) selectionWindow.close();
-      resolve(value ?? null);
-    });
-
-    selectionWindow.on("closed", () => {
-      resolve(null);
-    });
-
-    selectionWindow.loadURL(
-      `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
-    );
-
-    selectionWindow.once("ready-to-show", () => {
-      selectionWindow.show();
-    });
-  });
-}
-
-const THEME_OPTIONS = [
-  { id: "default", label: "Default" },
-  { id: "oled", label: "OLED Dark" },
-  { id: "nord", label: "Nord" },
-  { id: "dracula", label: "Dracula" },
-  { id: "solarized", label: "Solarized Dark" },
-  { id: "highcontrast", label: "High Contrast" },
-  { id: "alternative", label: "[EXP] Alternative Look" },
-  { id: "crimson", label: "Crimson" },
-  { id: "electriccrimson", label: "Electric Crimson" },
-  { id: "neoncoral", label: "Neon Coral" },
-  { id: "infernoorange", label: "Inferno Orange" },
-  { id: "solargold", label: "Solar Gold" },
-  { id: "acidlime", label: "Acid Lime" },
-  { id: "emeraldflash", label: "Emerald Flash" },
-  { id: "cyberteal", label: "Cyber Teal" },
-  { id: "electricblue", label: "Electric Blue" },
-  { id: "ultraviolet", label: "Ultraviolet" },
-  { id: "hotmagenta", label: "Hot Magenta" },
-  { id: "compact", label: "Compact Mode" },
-];
-
 // get platform-appropriate icon path
 function getIconPath() {
   const iconName =
@@ -752,11 +488,11 @@ function getIconPath() {
       : process.platform === "darwin"
       ? "icon.icns"
       : "icon.png";
-  const iconPath = path.join(__dirname, iconName);
+  const iconPath = path.join(app.getAppPath(), iconName);
   if (fs.existsSync(iconPath)) return iconPath;
   // fallback to any available icon
   for (const ext of ["png", "ico", "icns"]) {
-    const fallback = path.join(__dirname, `icon.${ext}`);
+    const fallback = path.join(app.getAppPath(), `icon.${ext}`);
     if (fs.existsSync(fallback)) return fallback;
   }
   return null;
@@ -805,30 +541,6 @@ ipcMain.handle("validate-css", (event, css) => {
   return { valid: true };
 });
 
-function getThemeCSS(theme) {
-  const themesPath = path.join(__dirname, "themes.css");
-  const allCSS = fs.readFileSync(themesPath, "utf8");
-
-  if (theme === "default") return "";
-
-  const themeRegex = new RegExp(
-    `\\/\\* ${theme} \\*\\/([\\s\\S]*?)(?=\\/\\* \\w+ \\*\\/|$)`
-  );
-  const match = allCSS.match(themeRegex);
-  return match ? match[1] : "";
-}
-
-function applyThemeCSS(theme) {
-  if (!mainWindow) return;
-
-  const css = getThemeCSS(theme);
-  mainWindow.webContents.removeInsertedCSS("theme").catch(() => {});
-
-  if (css) {
-    mainWindow.webContents.insertCSS(css, { cssKey: "theme" }).catch(() => {});
-  }
-}
-
 function applyTheme(theme) {
   if (!mainWindow) return;
 
@@ -837,19 +549,6 @@ function applyTheme(theme) {
 
   // Instant apply instead of full reload
   applyThemeCSS(theme);
-}
-
-function applyAndroidBubbles() {
-  if (!mainWindow) return;
-  const enabled = store.get("androidBubbles");
-  mainWindow.webContents.removeInsertedCSS("android-bubbles").catch(() => {});
-  if (!enabled) return;
-  const css = getThemeCSS("androidbubbles");
-  if (css) {
-    mainWindow.webContents
-      .insertCSS(css, { cssKey: "android-bubbles" })
-      .catch(() => {});
-  }
 }
 
 function toggleAndroidBubbles() {
@@ -1069,7 +768,7 @@ function toggleFocusMode() {
       div[role="navigation"] { display: none !important; }
       div[role="main"] { width: 100% !important; max-width: 100% !important; }
     `,
-      { cssKey: "focus-mode" }
+      { cssKey: "focus-mode" } as any
     );
   } else {
     mainWindow.webContents.reloadIgnoringCache();
@@ -1178,7 +877,7 @@ async function editQuickReplies({ reopenSettings = false } = {}) {
   }
 
   store.set("quickReplies", parsed);
-  registerGlobalShortcuts();
+  refreshGlobalShortcuts();
   updateMenu();
 
   if (mainWindow) {
@@ -1228,11 +927,9 @@ function toggleMenuBarMode() {
 function createTray() {
   if (tray) return true;
 
-  const { Tray } = require("electron");
-
   try {
     // prefer the pre-sized tray PNG, fall back to platform-specific icon
-    let iconPath = path.join(__dirname, "trayIcon.png");
+    let iconPath = path.join(app.getAppPath(), "trayIcon.png");
     if (!fs.existsSync(iconPath)) {
       iconPath = getIconPath();
     }
@@ -1568,266 +1265,6 @@ async function editCustomCSS() {
   }
 }
 
-const UPDATE_REPO = "pcstyleorg/messenger-desktop";
-const INSTALL_SCRIPT_URL =
-  process.env.MU_INSTALL_SCRIPT_URL ||
-  "https://raw.githubusercontent.com/pcstyleorg/messenger-desktop/main/install.sh";
-
-let updateCheckInFlight = false;
-let lastUpdateCheckWasSilent = true;
-let windowsUpdaterReady = false;
-
-function normalizeVersion(value) {
-  return String(value || "")
-    .trim()
-    .replace(/^v/i, "")
-    .split("-")[0];
-}
-
-function isNewerVersion(candidate, current) {
-  const a = normalizeVersion(candidate).split(".").map(Number);
-  const b = normalizeVersion(current).split(".").map(Number);
-  const max = Math.max(a.length, b.length);
-  for (let i = 0; i < max; i += 1) {
-    const left = a[i] || 0;
-    const right = b[i] || 0;
-    if (left > right) return true;
-    if (left < right) return false;
-  }
-  return false;
-}
-
-function requestText(url) {
-  return new Promise((resolve, reject) => {
-    const request = net.request({
-      method: "GET",
-      url,
-      headers: {
-        "User-Agent": `${app.getName()} (${process.platform})`,
-        "Accept": "application/vnd.github+json",
-      },
-    });
-    request.on("response", (response) => {
-      let data = "";
-      response.on("data", (chunk) => {
-        data += chunk;
-      });
-      response.on("end", () => {
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          resolve(data);
-        } else {
-          reject(
-            new Error(
-              `Request failed (${response.statusCode}) for ${url}`
-            )
-          );
-        }
-      });
-    });
-    request.on("error", reject);
-    request.end();
-  });
-}
-
-async function fetchLatestReleaseInfo() {
-  const url = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
-  const payload = await requestText(url);
-  const data = JSON.parse(payload);
-  const version = data.tag_name || data.name || "";
-  return {
-    version: normalizeVersion(version),
-    displayVersion: version || "",
-    url: data.html_url || `https://github.com/${UPDATE_REPO}/releases`,
-  };
-}
-
-function ensureWindowsAutoUpdater() {
-  if (!autoUpdater || windowsUpdaterReady) return;
-  windowsUpdaterReady = true;
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-
-  autoUpdater.on("checking-for-update", () => {
-    if (!lastUpdateCheckWasSilent) {
-      console.log("[Unleashed] Checking for updates...");
-    }
-  });
-
-  autoUpdater.on("update-available", (info) => {
-    if (!lastUpdateCheckWasSilent) {
-      dialog.showMessageBox(mainWindow, {
-        type: "info",
-        title: "Update Available",
-        message: `Downloading version ${info?.version || ""}...`,
-      });
-    }
-  });
-
-  autoUpdater.on("update-not-available", () => {
-    if (!lastUpdateCheckWasSilent) {
-      dialog.showMessageBox(mainWindow, {
-        type: "info",
-        title: "No Updates",
-        message: "You're already on the latest version.",
-      });
-    }
-  });
-
-  autoUpdater.on("error", (error) => {
-    console.error("[Unleashed] Auto-update error:", error);
-    if (!lastUpdateCheckWasSilent) {
-      dialog.showErrorBox(
-        "Update Error",
-        error?.message || "Update failed."
-      );
-    }
-  });
-
-  autoUpdater.on("update-downloaded", () => {
-    dialog
-      .showMessageBox(mainWindow, {
-        type: "info",
-        title: "Update Ready",
-        message: "Update downloaded. Restart to install?",
-        buttons: ["Restart Now", "Later"],
-        defaultId: 0,
-      })
-      .then(({ response }) => {
-        if (response === 0) {
-          autoUpdater.quitAndInstall();
-        }
-      });
-  });
-}
-
-async function runMacInstallScript() {
-  const script = await requestText(INSTALL_SCRIPT_URL);
-  if (!script.trim().startsWith("#!")) {
-    throw new Error("Installer script looks invalid.");
-  }
-
-  const tempDir = fs.mkdtempSync(
-    path.join(app.getPath("temp"), "messenger-update-")
-  );
-  const scriptPath = path.join(tempDir, "install.sh");
-  fs.writeFileSync(scriptPath, script, { mode: 0o755 });
-
-  const command = `/bin/bash "${scriptPath.replace(/"/g, '\\"')}"`;
-  const osaScript = `do shell script ${JSON.stringify(
-    command
-  )} with administrator privileges`;
-
-  const child = spawn("osascript", ["-e", osaScript], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
-
-  setTimeout(() => {
-    app.quit();
-  }, 1000);
-}
-
-async function checkForUpdatesMac({ silent }) {
-  if (process.platform !== "darwin") return;
-
-  if (!app.isPackaged) {
-    if (!silent) {
-      dialog.showMessageBox(mainWindow, {
-        type: "info",
-        title: "Updates Disabled",
-        message: "Auto-updates only work in packaged builds.",
-      });
-    }
-    return;
-  }
-
-  try {
-    const currentVersion = app.getVersion();
-    const latest = await fetchLatestReleaseInfo();
-    if (latest?.version && isNewerVersion(latest.version, currentVersion)) {
-      const { response } = await dialog.showMessageBox(mainWindow, {
-        type: "info",
-        title: "Update Available",
-        message: `Version ${latest.displayVersion || latest.version} is available.`,
-        detail:
-          "The updater will download and install using the installer script, and the app will quit during install. You may be asked for your macOS password.",
-        buttons: ["Install Update", "Later"],
-        defaultId: 0,
-      });
-      if (response === 0) {
-        await runMacInstallScript();
-      }
-    } else if (!silent) {
-      dialog.showMessageBox(mainWindow, {
-        type: "info",
-        title: "No Updates",
-        message: "You're already on the latest version.",
-      });
-    }
-  } catch (error) {
-    console.error("[Unleashed] Mac update check failed:", error);
-    if (!silent) {
-      dialog.showErrorBox(
-        "Update Error",
-        error?.message || "Update check failed."
-      );
-    }
-  }
-}
-
-async function checkForUpdatesWindows({ silent }) {
-  if (process.platform !== "win32") return;
-  if (!autoUpdater) {
-    if (!silent) {
-      dialog.showErrorBox(
-        "Updater Missing",
-        "Auto-updater is not available in this build."
-      );
-    }
-    return;
-  }
-
-  if (!app.isPackaged) {
-    if (!silent) {
-      dialog.showMessageBox(mainWindow, {
-        type: "info",
-        title: "Updates Disabled",
-        message: "Auto-updates only work in packaged builds.",
-      });
-    }
-    return;
-  }
-
-  try {
-    ensureWindowsAutoUpdater();
-    await autoUpdater.checkForUpdates();
-  } catch (error) {
-    console.error("[Unleashed] Windows update check failed:", error);
-    if (!silent) {
-      dialog.showErrorBox(
-        "Update Error",
-        error?.message || "Update check failed."
-      );
-    }
-  }
-}
-
-async function checkForUpdates({ silent = true } = {}) {
-  if (updateCheckInFlight) return;
-  updateCheckInFlight = true;
-  lastUpdateCheckWasSilent = !!silent;
-  try {
-    if (process.platform === "win32") {
-      await checkForUpdatesWindows({ silent });
-    } else if (process.platform === "darwin") {
-      await checkForUpdatesMac({ silent });
-    }
-  } finally {
-    updateCheckInFlight = false;
-  }
-}
-
 function applyModernLook() {
   if (!mainWindow) return;
   const enabled = store.get("modernLook");
@@ -2037,7 +1474,7 @@ function applyModernLook() {
       }
     `;
     mainWindow.webContents
-      .insertCSS(modernCSS, { cssKey: "modern-look" })
+      .insertCSS(modernCSS, { cssKey: "modern-look" } as any)
       .catch(() => {});
   } else {
     // If we're not also in glass mode, restore the current theme colors
@@ -2067,7 +1504,7 @@ function applyUICleanup() {
       display: none !important;
     }
   `;
-  mainWindow.webContents.insertCSS(cleanupCSS, { cssKey: "ui-cleanup" }).catch(() => {});
+  mainWindow.webContents.insertCSS(cleanupCSS, { cssKey: "ui-cleanup" } as any).catch(() => {});
 }
 
 function toggleModernLook() {
@@ -2184,7 +1621,7 @@ function applyFloatingGlass() {
       }
     `;
     mainWindow.webContents
-      .insertCSS(glassCSS, { cssKey: "floating-glass" })
+      .insertCSS(glassCSS, { cssKey: "floating-glass" } as any)
       .catch(() => {});
       
     // Force default theme to avoid clashing
@@ -2290,6 +1727,9 @@ ipcMain.on("update-setting", (event, { key, value }) => {
     case "spellCheck":
       mainWindow.webContents.session.setSpellCheckerEnabled(value);
       break;
+    case "shortcuts":
+      refreshGlobalShortcuts();
+      break;
   }
   
   updateMenu();
@@ -2348,7 +1788,7 @@ ipcMain.on("update-shortcut", (event, { action, accelerator }) => {
   const shortcuts = store.get("shortcuts") || {};
   shortcuts[action] = accelerator;
   store.set("shortcuts", shortcuts);
-  registerGlobalShortcuts();
+  refreshGlobalShortcuts();
   mainWindow.webContents.send("update-config", { shortcuts });
 });
 
@@ -2371,7 +1811,7 @@ function toggleChameleonMode() {
 function applyCustomCSS() {
   if (!mainWindow) return;
   const css = store.get("customCSS");
-  // We now delegate CSS application to preload.js so it can be responsive to chat backgrounds
+  // We now delegate CSS application to the preload bridge so it can be responsive to chat backgrounds
   mainWindow.webContents.send("apply-custom-css", css);
 }
 
@@ -2410,82 +1850,6 @@ async function exportCookies() {
   } catch (err) {
     dialog.showErrorBox("Export Failed", err.message);
   }
-}
-
-// --- Chat Head Logic ---
-let chatHeadWindow = null;
-let activeChatInfo = null;
-
-ipcMain.on("update-active-chat", (event, info) => {
-  activeChatInfo = info;
-  if (chatHeadWindow && !chatHeadWindow.isDestroyed()) {
-     chatHeadWindow.webContents.send('update-head', info);
-  }
-});
-
-ipcMain.on("chat-head-clicked", () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-  }
-  if (chatHeadWindow) chatHeadWindow.hide();
-});
-
-function createChatHead() {
-  if (chatHeadWindow && !chatHeadWindow.isDestroyed()) {
-    chatHeadWindow.show();
-    chatHeadWindow.webContents.send('update-head', activeChatInfo);
-    return;
-  }
-
-  const { screen } = require('electron');
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width } = primaryDisplay.workAreaSize;
-
-  chatHeadWindow = new BrowserWindow({
-    width: 70,
-    height: 70,
-    x: width - 90,
-    y: 100,
-    frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    resizable: false,
-    hasShadow: false,
-    skipTaskbar: true,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    }
-  });
-
-  const html = `
-    <html>
-      <body style="margin:0; padding:5px; overflow:hidden; background:transparent; -webkit-app-region: drag;">
-        <div id="avatar" style="width:54px; height:54px; border-radius:50%; background-color:#333; background-size:cover; background-position:center; border:3px solid #0084ff; box-shadow: 0 4px 12px rgba(0,0,0,0.5); cursor:pointer; transition: transform 0.1s;"></div>
-        <script>
-          const { ipcRenderer } = require('electron');
-          const avatar = document.getElementById('avatar');
-          avatar.onclick = () => ipcRenderer.send('chat-head-clicked');
-          avatar.onmouseenter = () => avatar.style.transform = 'scale(1.1)';
-          avatar.onmouseleave = () => avatar.style.transform = 'scale(1.0)';
-          
-          ipcRenderer.on('update-head', (_, info) => {
-             if (info.src) avatar.style.backgroundImage = 'url(' + info.src + ')';
-          });
-        </script>
-      </body>
-    </html>
-  `;
-
-  chatHeadWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-  
-  chatHeadWindow.webContents.on('did-finish-load', () => {
-     if (activeChatInfo) {
-        chatHeadWindow.webContents.send('update-head', activeChatInfo);
-     }
-  });
 }
 
 async function importCookies() {
@@ -2628,7 +1992,7 @@ function updateMenu() {
   const quietHoursStartLabel = formatTimeLabel(parseTimeInput(quietHoursStart));
   const quietHoursEndLabel = formatTimeLabel(parseTimeInput(quietHoursEnd));
 
-  const template = [
+  const template: MenuItemConstructorOptions[] = [
     {
       label: app.name,
       submenu: [
@@ -2950,7 +2314,7 @@ function updateMenu() {
                   click: () => sendQuickReply(qr.text),
                 })),
                 { type: "separator" },
-                { label: "Edit Quick Replies...", click: editQuickReplies },
+                { label: "Edit Quick Replies...", click: () => editQuickReplies() },
               ],
             },
             { type: "separator" },
@@ -3075,18 +2439,16 @@ function ensureMainWindowVisible() {
       mainWindow.show();
     }
     mainWindow.focus();
-    if (chatHeadWindow && !chatHeadWindow.isDestroyed()) {
-      chatHeadWindow.hide();
-    }
+    hideChatHead();
     return;
   }
-  if (!isAppQuiting) {
+  if (!appState.isAppQuiting) {
     createWindow();
   }
 }
 
 function restoreMainWindowAfterClose(closedWindow) {
-  if (isAppQuiting) return;
+  if (appState.isAppQuiting) return;
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (closedWindow === mainWindow) return;
 
@@ -3178,12 +2540,13 @@ function createWindow() {
     title: "Messenger Unleashed",
     alwaysOnTop: store.get("alwaysOnTop"),
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: store.get("spellCheck"),
     },
   });
+  appState.mainWindow = mainWindow;
 
   mainWindow.webContents.setUserAgent(USER_AGENT);
   mainWindow.webContents.setMaxListeners(20);
@@ -3328,7 +2691,7 @@ function createWindow() {
         div[role="navigation"] { display: none !important; }
         div[role="main"] { width: 100% !important; max-width: 100% !important; }
       `,
-        { cssKey: "focus-mode" }
+        { cssKey: "focus-mode" } as any
       );
     }
 
@@ -3370,27 +2733,19 @@ function createWindow() {
   });
 
   mainWindow.on("minimize", () => {
-    if (activeChatInfo && activeChatInfo.src) {
-       createChatHead();
-    }
+    showChatHeadIfAvailable();
   });
 
   mainWindow.on("restore", () => {
-    if (chatHeadWindow) {
-      chatHeadWindow.hide();
-    }
+    hideChatHead();
   });
 
   mainWindow.on("show", () => {
-    if (chatHeadWindow) {
-      chatHeadWindow.hide();
-    }
+    hideChatHead();
   });
 
   mainWindow.on("hide", () => {
-    if (activeChatInfo && activeChatInfo.src) {
-      createChatHead();
-    }
+    showChatHeadIfAvailable();
   });
 
   mainWindow.on("resize", () => {
@@ -3399,18 +2754,17 @@ function createWindow() {
   });
 
   mainWindow.on("close", (event) => {
-    if (!isAppQuiting) {
+    if (!appState.isAppQuiting) {
       event.preventDefault();
       mainWindow.hide();
-      if (activeChatInfo && activeChatInfo.src) {
-        createChatHead();
-      }
+      showChatHeadIfAvailable();
     }
     return false;
   });
 
   mainWindow.on("closed", () => {
     mainWindow = null;
+    appState.mainWindow = null;
   });
 
   if (store.get("menuBarMode")) {
@@ -3433,7 +2787,7 @@ function createWindow() {
 }
 
 app.on("ready", () => {
-  registerGlobalShortcuts();
+  refreshGlobalShortcuts();
 });
 
 app.on("browser-window-created", (event, window) => {
@@ -3443,7 +2797,6 @@ app.on("browser-window-created", (event, window) => {
 });
 
 function registerGlobalShortcuts() {
-  const { globalShortcut } = require("electron");
   globalShortcut.unregisterAll();
 
   const shortcuts = store.get("shortcuts") || {};
@@ -3469,6 +2822,31 @@ function registerGlobalShortcuts() {
       sendQuickReply(qr.text)
     );
   });
+
+  shortcutsRegistered = true;
+  shortcutsDirty = false;
+}
+
+function refreshGlobalShortcuts() {
+  shortcutsDirty = true;
+  if (isAnyWindowFocused()) {
+    registerGlobalShortcuts();
+  }
+}
+
+function isAnyWindowFocused() {
+  return BrowserWindow.getAllWindows().some((win) => win.isFocused());
+}
+
+function maybeDisableGlobalShortcuts() {
+  setTimeout(() => {
+    if (!isAnyWindowFocused()) {
+      if (shortcutsRegistered) {
+        globalShortcut.unregisterAll();
+        shortcutsRegistered = false;
+      }
+    }
+  }, 120);
 }
 
 app.whenReady().then(() => {
@@ -3496,6 +2874,16 @@ app.whenReady().then(() => {
   });
 });
 
+app.on("browser-window-focus", () => {
+  if (!shortcutsRegistered || shortcutsDirty) {
+    registerGlobalShortcuts();
+  }
+});
+
+app.on("browser-window-blur", () => {
+  maybeDisableGlobalShortcuts();
+});
+
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
@@ -3503,7 +2891,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  isAppQuiting = true;
+  appState.isAppQuiting = true;
   if (quietHoursTimer) {
     clearInterval(quietHoursTimer);
     quietHoursTimer = null;
@@ -3511,6 +2899,5 @@ app.on("before-quit", () => {
 });
 
 app.on("will-quit", () => {
-  const { globalShortcut } = require("electron");
   globalShortcut.unregisterAll();
 });
