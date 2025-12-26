@@ -7,7 +7,7 @@
   "main": "build/main/index.js",
   "scripts": {
     "build:main": "tsc -p tsconfig.main.json",
-    "build:preload": "tsc -p tsconfig.preload.json",
+    "build:preload": "tsc -p tsconfig.preload.json && node scripts/rename-preload.cjs",
     "build:ts": "bun run build:main && bun run build:preload",
     "dev": "bun run build:ts && electron . --js-flags=\"--max-old-space-size=4096\"",
     "debug": "bun run build:ts && DEBUG_REQUEST_BLOCKER=1 DEBUG_REQUEST_BLOCKER_GRAPHQL_ALL=1 DEBUG_REQUEST_BLOCKER_WS=1 DEBUG_REQUEST_BLOCKER_WS_DECODE=1 DEBUG_REQUEST_BLOCKER_WS_TRACE_TYPING=1 EXP_BLOCK_TYPING_OVERLAY=1 electron . --js-flags=\"--max-old-space-size=4096\"",
