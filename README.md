@@ -67,6 +67,8 @@ bun install
 bun run dev
 ```
 
+Version bumps: `bun bump patch|minor|major`
+
 ## License
 
 MIT
