@@ -14,7 +14,8 @@
     "build": "bun run build:ts && electron-builder",
     "build:mac": "bun run build:ts && electron-builder --mac",
     "build:win": "bun run build:ts && electron-builder --win",
-    "bump": "node scripts/bump.cjs"
+    "bump": "node scripts/bump.cjs",
+    "postinstall": "node scripts/fix-ajv.cjs"
   },
   "dependencies": {
     "electron-store": "^8.1.0",
