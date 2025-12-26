@@ -85,9 +85,10 @@ export async function openInputDialog({
           const input = document.getElementById('input');
           input.focus();
           input.select();
+          const isMultiline = ${JSON.stringify(!!multiline)};
           input.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') window.dialogAPI.cancel();
-            if (!${multiline} && e.key === 'Enter') window.dialogAPI.submit(input.value);
+            if (!isMultiline && e.key === 'Enter') window.dialogAPI.submit(input.value);
           });
         </script>
       </body>

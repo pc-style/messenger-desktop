@@ -1,5 +1,11 @@
 import { BrowserWindow, ipcMain, screen } from "electron";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { appState, store } from "./state.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const CHAT_HEAD_PRELOAD = path.join(__dirname, "../preload/chat-head.js");
 
 let chatHeadWindow: BrowserWindow | null = null;
 let activeChatInfo: { src?: string } | null = null;
@@ -63,8 +69,10 @@ export function createChatHead(initialSrc?: string) {
     hasShadow: false,
     skipTaskbar: true,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      preload: CHAT_HEAD_PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
     },
   });
 
@@ -73,7 +81,6 @@ export function createChatHead(initialSrc?: string) {
       <body style="margin:0; padding:5px; overflow:hidden; background:transparent; -webkit-app-region: drag;">
         <div id="avatar" style="width:54px; height:54px; border-radius:50%; background-color:#333; background-size:cover; background-position:center; border:3px solid #7b61ff; box-shadow: 0 4px 12px rgba(0,0,0,0.5); cursor:pointer; transition: transform 0.1s; display:flex; align-items:center; justify-content:center; color:#fff; font-family: sans-serif; font-weight: 700;">M</div>
         <script>
-          const { ipcRenderer } = require('electron');
           const avatar = document.getElementById('avatar');
           const setAvatar = (src) => {
             if (src) {
@@ -84,12 +91,11 @@ export function createChatHead(initialSrc?: string) {
               avatar.textContent = 'M';
             }
           };
-          avatar.onclick = () => ipcRenderer.send('chat-head-clicked');
+          avatar.onclick = () => window.chatHeadAPI?.notifyClick();
           avatar.onmouseenter = () => avatar.style.transform = 'scale(1.1)';
           avatar.onmouseleave = () => avatar.style.transform = 'scale(1.0)';
-          
-          ipcRenderer.on('update-head', (_, info) => {
-             setAvatar(info && info.src);
+          window.chatHeadAPI?.onUpdate((info) => {
+            setAvatar(info && info.src);
           });
           setAvatar(${JSON.stringify(initialSrc || "")});
         </script>

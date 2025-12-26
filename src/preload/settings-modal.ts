@@ -12,7 +12,16 @@ function showSettingsModal(config: any) {
   const existing = document.getElementById("unleashed-settings-overlay")
   if (existing) existing.remove()
 
+  let modal: HTMLDivElement | null = null
+  let style: HTMLStyleElement | null = null
+  let mainTitle: HTMLHeadingElement | null = null
+  let subTitle: HTMLDivElement | null = null
+  let closeBtn: HTMLDivElement | null = null
+  let footerHint: HTMLDivElement | null = null
+
   const updateTheme = () => {
+    if (!modal || !style || !mainTitle || !subTitle || !closeBtn || !footerHint) return
+
     const isDarkMode =
       window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
     const bgColor = isDarkMode ? "rgba(28, 28, 30, 0.8)" : "rgba(255, 255, 255, 0.8)"
@@ -128,7 +137,7 @@ function showSettingsModal(config: any) {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   `
 
-  const modal = document.createElement("div")
+  modal = document.createElement("div")
   modal.style.cssText = `
     background: ${bgColor};
     width: 600px; max-height: 85vh;
@@ -140,7 +149,7 @@ function showSettingsModal(config: any) {
     animation: settingsFadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   `
 
-  const style = document.createElement("style")
+  style = document.createElement("style")
   document.head.appendChild(style)
 
   const header = document.createElement("div")
@@ -148,17 +157,17 @@ function showSettingsModal(config: any) {
     `padding: 24px 24px 16px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid ${sectionBorderColor};`
 
   const titleGroup = document.createElement("div")
-  const mainTitle = document.createElement("h2")
+  mainTitle = document.createElement("h2")
   mainTitle.textContent = "Messenger Unleashed"
   mainTitle.style.cssText = `margin: 0; font-size: 20px; font-weight: 700; color: ${textColor};`
 
-  const subTitle = document.createElement("div")
+  subTitle = document.createElement("div")
   subTitle.textContent = `v${config.version || "1.4.0"} — Settings`
   subTitle.style.cssText = `font-size: 12px; color: ${subTextColor}; font-weight: 500; margin-top: 2px;`
 
   titleGroup.append(mainTitle, subTitle)
 
-  const closeBtn = document.createElement("div")
+  closeBtn = document.createElement("div")
   closeBtn.innerHTML = ICONS.close
   closeBtn.style.cssText =
     `font-size: 24px; cursor: pointer; color: ${subTextColor}; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: background 0.2s;`
@@ -596,7 +605,7 @@ function showSettingsModal(config: any) {
   const footer = document.createElement("div")
   footer.className = "close-area"
 
-  const footerHint = document.createElement("div")
+  footerHint = document.createElement("div")
   footerHint.textContent = "Some changes may require a reload."
   footerHint.style.cssText = `font-size: 11px; color: ${subTextColor};`
 

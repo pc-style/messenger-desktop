@@ -32,7 +32,7 @@ fs.writeFileSync(versionPath, `v${newVersion}\n`);
 
 // Update settings-modal.ts fallback version
 let preloadContent = fs.readFileSync(preloadPath, 'utf8');
-const fallbackRegex = /config\.version \|\| "(\d+\.\d+\.\d+)"/;
+const fallbackRegex = new RegExp('config\\.version \\|\\| "(\\d+\\.\\d+\\.\\d+)"');
 
 if (fallbackRegex.test(preloadContent)) {
   preloadContent = preloadContent.replace(

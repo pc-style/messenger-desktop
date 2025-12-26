@@ -25,7 +25,14 @@ export const THEME_OPTIONS = [
   { id: "compact", label: "Compact Mode" },
 ];
 
+export const ANDROID_BUBBLES_THEME_ID = "androidbubbles";
+const THEME_IDS = new Set([
+  ...THEME_OPTIONS.map((option) => option.id),
+  ANDROID_BUBBLES_THEME_ID,
+]);
+
 export function getThemeCSS(theme: string) {
+  if (!THEME_IDS.has(theme)) return "";
   if (theme === "default") return "";
   const themesPath = path.join(app.getAppPath(), "themes.css");
   const allCSS = fs.readFileSync(themesPath, "utf8");
@@ -56,7 +63,7 @@ export function applyAndroidBubbles() {
     .removeInsertedCSS("android-bubbles")
     .catch(() => {});
   if (!enabled) return;
-  const css = getThemeCSS("androidbubbles");
+  const css = getThemeCSS(ANDROID_BUBBLES_THEME_ID);
   if (css) {
     appState.mainWindow.webContents
       .insertCSS(css, { cssKey: "android-bubbles" } as any)
