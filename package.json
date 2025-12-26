@@ -1,16 +1,18 @@
 {
   "name": "messenger-unleashed",
   "productName": "Messenger Unleashed",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Messenger desktop app with extra features",
-  "main": "main.js",
+  "type": "module",
+  "main": "build/main/index.js",
   "scripts": {
-    "dev": "electron . --js-flags=\"--max-old-space-size=4096\"",
-    "debug": "DEBUG_REQUEST_BLOCKER=1 DEBUG_REQUEST_BLOCKER_GRAPHQL_ALL=1 DEBUG_REQUEST_BLOCKER_WS=1 DEBUG_REQUEST_BLOCKER_WS_DECODE=1 DEBUG_REQUEST_BLOCKER_WS_TRACE_TYPING=1 EXP_BLOCK_TYPING_OVERLAY=1 electron . --js-flags=\"--max-old-space-size=4096\"",
-    "build": "electron-builder",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win",
-    "bump": "node scripts/bump.js"
+    "build:ts": "tsc -p tsconfig.json",
+    "dev": "bun run build:ts && electron . --js-flags=\"--max-old-space-size=4096\"",
+    "debug": "bun run build:ts && DEBUG_REQUEST_BLOCKER=1 DEBUG_REQUEST_BLOCKER_GRAPHQL_ALL=1 DEBUG_REQUEST_BLOCKER_WS=1 DEBUG_REQUEST_BLOCKER_WS_DECODE=1 DEBUG_REQUEST_BLOCKER_WS_TRACE_TYPING=1 EXP_BLOCK_TYPING_OVERLAY=1 electron . --js-flags=\"--max-old-space-size=4096\"",
+    "build": "bun run build:ts && electron-builder",
+    "build:mac": "bun run build:ts && electron-builder --mac",
+    "build:win": "bun run build:ts && electron-builder --win",
+    "bump": "node scripts/bump.cjs"
   },
   "dependencies": {
     "electron-store": "^8.1.0",
@@ -18,7 +20,8 @@
   },
   "devDependencies": {
     "electron": "^33.2.1",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.6.3"
   },
   "build": {
     "appId": "com.messenger.unleashed",
@@ -71,9 +74,10 @@
       ]
     },
     "files": [
-      "main.js",
-      "preload.js",
-      "dialog-preload.js",
+      "build/**",
+      "icon.icns",
+      "icon.ico",
+      "README.txt",
       "themes.css",
       "trayIcon.png"
     ]

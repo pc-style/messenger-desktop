@@ -1,0 +1,59 @@
+import Store from "electron-store";
+import type { BrowserWindow, Tray } from "electron";
+
+export const store = new Store({
+  defaults: {
+    alwaysOnTop: false,
+    theme: "default",
+    doNotDisturb: false,
+    windowBounds: { width: 1200, height: 800 },
+    launchAtLogin: false,
+    focusMode: false,
+    quickReplies: [
+      { key: "1", text: "On my way!" },
+      { key: "2", text: "Be right back" },
+      { key: "3", text: "Sounds good!" },
+      { key: "4", text: "Can we talk later?" },
+      { key: "5", text: "Thanks!" },
+      { key: "6", text: "Let me check and get back to you." },
+    ],
+    menuBarMode: false,
+    blockReadReceipts: false,
+    blockActiveStatus: false,
+    spellCheck: true,
+    keywordAlerts: ["urgent", "asap"],
+    keywordAlertsEnabled: true,
+    clipboardSanitize: true,
+    scheduleDelayMs: 30000,
+    blockTypingIndicator: false,
+    expTypingOverlay: false,
+    windowOpacity: 1.0,
+    customCSS: "",
+    modernLook: false,
+    floatingGlass: false,
+    androidBubbles: false,
+    quietHoursEnabled: false,
+    quietHoursStart: "22:00",
+    quietHoursEnd: "07:00",
+    quietHoursApplied: false,
+    shortcuts: {
+      toggleAlwaysOnTop: "CmdOrCtrl+Shift+T",
+      toggleDoNotDisturb: "CmdOrCtrl+Shift+D",
+      toggleFocusMode: "CmdOrCtrl+Shift+F",
+      createPipWindow: "CmdOrCtrl+Shift+P",
+      focusSearch: "CmdOrCtrl+K",
+      scheduleSendNow: "CmdOrCtrl+Alt+Enter",
+      bossKey: "CmdOrCtrl+Shift+B",
+    },
+  },
+});
+
+export const appState = {
+  mainWindow: null as BrowserWindow | null,
+  pipWindow: null as BrowserWindow | null,
+  tray: null as Tray | null,
+  unreadCount: 0,
+  typingBlockerHandler: null as ((details: any, callback: any) => void) | null,
+  quietHoursTimer: null as NodeJS.Timeout | null,
+  isAppQuiting: false,
+};

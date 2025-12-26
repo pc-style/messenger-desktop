@@ -1,8 +1,9 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `main.js`: Electron main process; handles windows, tray, menu, shortcuts, quick replies, and settings persistence via `electron-store`.
-- `preload.js`: Preload bridge for renderer tweaks; loaded by the single `BrowserWindow`.
+- `src/main/index.ts`: Electron main process; handles windows, tray, menu, shortcuts, quick replies, and settings persistence via `electron-store`.
+- `src/preload/index.ts`: Preload bridge for renderer tweaks; loaded by the single `BrowserWindow`.
+- `src/preload/dialog.ts`: Preload for sandboxed dialog windows.
 - `themes.css`: Theme slices (`/* oled */`, `/* compact */`, etc.) injected at runtime; keep new themes in this file.
 - `dist/`: Generated binaries/installers (git-ignored when rebuilding locally).
 - `icon.icns`, `icon.ico`: Platform icons referenced by electron-builder.
@@ -35,4 +36,4 @@
 ## Security & Configuration Tips
 - Do not log or commit auth/session data; keep `messenger-session.json` local.
 - When adding new permissions or preload bridges, keep them minimal and documented to avoid widening the attack surface.
-- Electron store defaults live in `main.js`; update defaults and migration logic together when introducing new settings.
+- Electron store defaults live in `src/main/state.ts`; update defaults and migration logic together when introducing new settings.
