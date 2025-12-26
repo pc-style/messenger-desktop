@@ -2,7 +2,7 @@
 
 import styles from "./page.module.css";
 import Image from "next/image";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 // SVG Icons as components
 const Icons = {
@@ -111,7 +111,12 @@ const URLS = {
   themeCreator: "https://mstheme.pcstyle.dev",
 };
 
+const MAC_INSTALL_CMD =
+  "curl -fsSL https://raw.githubusercontent.com/pcstyleorg/messenger-desktop/main/install.sh | bash";
+
 export default function HomeClient({ version }: { version: string }) {
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     // Intersection Observer for scroll animations
     const observer = new IntersectionObserver(
@@ -137,6 +142,21 @@ export default function HomeClient({ version }: { version: string }) {
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  const copyInstallCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(MAC_INSTALL_CMD);
+      setCopied(true);
+    } catch (error) {
+      console.error("Failed to copy install command", error);
+    }
+  };
+
   return (
     <main>
       {/* Navigation */}
@@ -153,7 +173,7 @@ export default function HomeClient({ version }: { version: string }) {
         </ul>
         <a href="#download" className={styles.navCta}>
           {Icons.download}
-          Download
+          Get the app
         </a>
       </nav>
 
@@ -175,20 +195,18 @@ export default function HomeClient({ version }: { version: string }) {
           <p className={`${styles.tagline} mono`}>chat on your terms</p>
           
           <p className={styles.heroDescription}>
-            A supercharged desktop client for Messenger with privacy features, 
-            deep customization, and power-user tools. Block read receipts. 
-            Choose from 17+ themes. Schedule messages. All in a native app 
-            that respects your privacy.
+            A focused, desktop-first Messenger client with privacy controls, custom looks,
+            floating chat heads, screen sharing, and built-in power tools. Built to feel native.
           </p>
           
           <div className={styles.ctaGroup}>
-            <a href={URLS.releases} target="_blank" rel="noopener noreferrer" className={`${styles.btn} ${styles.btnPrimary}`}>
-              {Icons.download}
-              Download Free
+            <a href="#install" className={`${styles.btn} ${styles.btnPrimary}`}>
+              {Icons.apple}
+              Install on macOS
             </a>
-            <a href={URLS.github} target="_blank" rel="noopener noreferrer" className={`${styles.btn} ${styles.btnSecondary}`}>
-              {Icons.github}
-              View Source
+            <a href={URLS.releases} target="_blank" rel="noopener noreferrer" className={`${styles.btn} ${styles.btnSecondary}`}>
+              {Icons.windows}
+              Download for Windows
             </a>
           </div>
         </div>
@@ -209,8 +227,8 @@ export default function HomeClient({ version }: { version: string }) {
             <span>Read receipts blocked</span>
           </div>
           <div className={`${styles.floatBadge} ${styles.floatBadgeBottom}`}>
-            {Icons.palette}
-            <span>17+ themes</span>
+            {Icons.bolt}
+            <span>Auto-updates</span>
           </div>
         </div>
       </section>
@@ -233,7 +251,7 @@ export default function HomeClient({ version }: { version: string }) {
           <div className={`${styles.featureCard} ${styles.featureCardPrivacy} ${styles.animateIn}`}>
             <div className={`${styles.featureIcon} ${styles.featureIconCyan}`}>{Icons.keyboard}</div>
             <h3>Hide Typing Indicator</h3>
-            <p>Craft your message in peace without the pressure of &ldquo;typing...&rdquo; showing.</p>
+            <p>Draft replies without the &ldquo;typing...&rdquo; bubble showing up.</p>
           </div>
 
           <div className={`${styles.featureCard} ${styles.featureCardPrivacy} ${styles.animateIn}`}>
@@ -251,13 +269,19 @@ export default function HomeClient({ version }: { version: string }) {
           <div className={`${styles.featureCard} ${styles.featureCardPrivacy} ${styles.animateIn}`}>
             <div className={`${styles.featureIcon} ${styles.featureIconCyan}`}>{Icons.lock}</div>
             <h3>Invisible Ink</h3>
-            <p>Send hidden messages that only reveal when hovered. Local encryption.</p>
+            <p>Send hidden messages that only reveal on hover. Local-only encoding.</p>
+          </div>
+
+          <div className={`${styles.featureCard} ${styles.featureCardPower} ${styles.animateIn}`}>
+            <div className={`${styles.featureIcon} ${styles.featureIconOrange}`}>{Icons.window}</div>
+            <h3>Screen Share + Calls</h3>
+            <p>All the original Messenger features, including voice, video, and screen share.</p>
           </div>
 
           <div className={`${styles.featureCard} ${styles.featureCardPower} ${styles.animateIn}`}>
             <div className={`${styles.featureIcon} ${styles.featureIconOrange}`}>{Icons.clock}</div>
             <h3>Scheduled Messages</h3>
-            <p>Delay sending with configurable timer. 5s, 10s, 30s, or 60s options.</p>
+            <p>Delay sending with a configurable timer for cleaner follow-ups.</p>
           </div>
 
           {/* Theme Card - Large */}
@@ -306,20 +330,20 @@ export default function HomeClient({ version }: { version: string }) {
 
           <div className={`${styles.featureCard} ${styles.featureCardDesktop} ${styles.animateIn}`}>
             <div className={`${styles.featureIcon} ${styles.featureIconPurple}`}>{Icons.pin}</div>
-            <h3>Always on Top</h3>
-            <p>Pin the window above all others. Never lose your conversation.</p>
-          </div>
-
-          <div className={`${styles.featureCard} ${styles.featureCardDesktop} ${styles.animateIn}`}>
-            <div className={`${styles.featureIcon} ${styles.featureIconPurple}`}>{Icons.focus}</div>
-            <h3>Focus Mode</h3>
-            <p>Hide the chat list for distraction-free conversations.</p>
+            <h3>Floating Chat Heads</h3>
+            <p>Keep a conversation within reach even when you minimize the app.</p>
           </div>
 
           <div className={`${styles.featureCard} ${styles.featureCardDesktop} ${styles.animateIn}`}>
             <div className={`${styles.featureIcon} ${styles.featureIconPurple}`}>{Icons.window}</div>
-            <h3>Boss Mode (Chameleon)</h3>
-            <p>Instantly disguise the app as a boring Excel spreadsheet with Ctrl+B.</p>
+            <h3>Picture-in-Picture</h3>
+            <p>Pop a mini chat window over your other apps with a hotkey.</p>
+          </div>
+
+          <div className={`${styles.featureCard} ${styles.featureCardDesktop} ${styles.animateIn}`}>
+            <div className={`${styles.featureIcon} ${styles.featureIconPurple}`}>{Icons.bolt}</div>
+            <h3>Auto Updates</h3>
+            <p>Stay current without juggling downloads or installers.</p>
           </div>
 
           <div className={`${styles.featureCard} ${styles.featureCardPower} ${styles.animateIn}`}>
@@ -329,9 +353,9 @@ export default function HomeClient({ version }: { version: string }) {
           </div>
 
           <div className={`${styles.featureCard} ${styles.featureCardCustomize} ${styles.animateIn}`}>
-            <div className={`${styles.featureIcon} ${styles.featureIconMagenta}`}>{Icons.window}</div>
-            <h3>Window Opacity</h3>
-            <p>Adjust transparency to 25%, 50%, 75%, or 100%. See through your chat.</p>
+            <div className={`${styles.featureIcon} ${styles.featureIconMagenta}`}>{Icons.palette}</div>
+            <h3>Custom CSS + Glass</h3>
+            <p>Fine-tune every pixel with custom CSS, glass, and compact modes.</p>
           </div>
         </div>
       </section>
@@ -351,7 +375,8 @@ export default function HomeClient({ version }: { version: string }) {
             <ul className={styles.showcaseList}>
               <li>Menu bar mode (hide from dock)</li>
               <li>Launch at login</li>
-              <li>Do Not Disturb mode</li>
+              <li>Do Not Disturb + Quiet Hours</li>
+              <li>Always on top</li>
               <li>Native notifications</li>
             </ul>
           </div>
@@ -363,8 +388,8 @@ export default function HomeClient({ version }: { version: string }) {
             <ul className={styles.showcaseList}>
               <li>Custom CSS injection</li>
               <li>Visual theme creator</li>
-              <li>Glassmorphism mode</li>
-              <li>Compact UI option</li>
+              <li>Glass + compact UI modes</li>
+              <li>Android-style bubbles</li>
             </ul>
           </div>
 
@@ -390,14 +415,31 @@ export default function HomeClient({ version }: { version: string }) {
           <h2 className={`${styles.downloadTitle} ${styles.animateIn}`}>Ready to unleash?</h2>
           <p className={`${styles.downloadDesc} ${styles.animateIn}`}>Free. Open source. Forever.</p>
 
-          <div className={`${styles.downloadButtons} ${styles.animateIn}`}>
-            <a href={URLS.releases} target="_blank" rel="noopener noreferrer" className={styles.downloadBtn}>
-              {Icons.apple}
-              <div className={styles.downloadBtnText}>
-                <span className={styles.downloadBtnLabel}>Download for</span>
-                <span className={styles.downloadBtnPlatform}>macOS</span>
+          <div className={`${styles.downloadGrid} ${styles.animateIn}`}>
+            <div className={styles.installCard} id="install">
+              <div className={styles.installHeader}>
+                {Icons.apple}
+                <div>
+                  <span className={styles.installLabel}>Install on</span>
+                  <span className={styles.installPlatform}>macOS</span>
+                </div>
               </div>
-            </a>
+              <p className={styles.installHint}>Run this one-liner in Terminal:</p>
+              <div className={styles.installCmd}>
+                <code>{MAC_INSTALL_CMD}</code>
+                <button
+                  type="button"
+                  className={styles.copyBtn}
+                  onClick={copyInstallCommand}
+                  aria-live="polite"
+                >
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+              <span className={styles.installNote}>
+                Uses the official installer script from GitHub.
+              </span>
+            </div>
 
             <a href={URLS.releases} target="_blank" rel="noopener noreferrer" className={styles.downloadBtn}>
               {Icons.windows}

@@ -9,7 +9,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: linear-gradient(to bottom, var(--bg-deep), transparent);
+  background: linear-gradient(to bottom, rgba(11, 13, 18, 0.9), transparent);
+  backdrop-filter: blur(10px);
 }
 
 .logo {
@@ -53,7 +54,7 @@
 }
 
 .navCta {
-  background: var(--bg-elevated);
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
   padding: 0.6rem 1.2rem;
   border-radius: 8px;
@@ -66,9 +67,9 @@
 }
 
 .navCta:hover {
-  background: var(--accent-cyan);
-  color: var(--bg-deep);
-  border-color: var(--accent-cyan);
+  background: var(--accent-magenta);
+  color: #141414;
+  border-color: var(--accent-magenta);
 }
 
 /* Hero Section */
@@ -87,7 +88,7 @@
   right: 0;
   width: 60%;
   height: 80%;
-  background: radial-gradient(ellipse at top right, var(--glow-cyan), transparent 50%);
+  background: radial-gradient(ellipse at top right, var(--glow-cyan), transparent 55%);
   opacity: 0.4;
   pointer-events: none;
 }
@@ -183,12 +184,12 @@
   transition: all 0.25s;
   cursor: pointer;
   border: none;
-  font-family: 'Outfit', sans-serif;
+  font-family: 'Space Grotesk', sans-serif;
 }
 
 .btnPrimary {
   background: var(--accent-cyan);
-  color: var(--bg-deep);
+  color: #0b0d12;
 }
 
 .btnPrimary:hover {
@@ -223,7 +224,7 @@
   overflow: hidden;
   box-shadow: 
     0 0 0 1px var(--border),
-    0 50px 100px -20px rgba(0, 0, 0, 0.6),
+    0 60px 120px -30px rgba(0, 0, 0, 0.7),
     0 0 60px var(--glow-cyan);
   animation: float 6s ease-in-out infinite;
   transform: rotateY(-8deg) rotateX(4deg);
@@ -335,7 +336,7 @@
 
 .featureCard:hover {
   transform: translateY(-4px);
-  border-color: var(--text-muted);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .featureCard:hover::before {
@@ -362,10 +363,10 @@
   height: 22px;
 }
 
-.featureIconCyan { background: rgba(0, 212, 170, 0.15); color: var(--accent-cyan); }
-.featureIconMagenta { background: rgba(255, 61, 138, 0.15); color: var(--accent-magenta); }
-.featureIconOrange { background: rgba(255, 159, 67, 0.15); color: var(--accent-orange); }
-.featureIconPurple { background: rgba(139, 92, 246, 0.15); color: var(--accent-purple); }
+.featureIconCyan { background: rgba(75, 183, 255, 0.15); color: var(--accent-cyan); }
+.featureIconMagenta { background: rgba(245, 160, 74, 0.18); color: var(--accent-magenta); }
+.featureIconOrange { background: rgba(242, 193, 78, 0.18); color: var(--accent-orange); }
+.featureIconPurple { background: rgba(240, 107, 107, 0.18); color: var(--accent-purple); }
 
 .featureCard h3 {
   font-size: 1rem;
@@ -557,11 +558,12 @@
   font-size: 1.1rem;
 }
 
-.downloadButtons {
-  display: flex;
-  justify-content: center;
+.downloadGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
   gap: 1.5rem;
-  margin-bottom: 2rem;
+  align-items: stretch;
+  margin-bottom: 2.5rem;
 }
 
 .downloadBtn {
@@ -573,6 +575,7 @@
   padding: 1.25rem 2rem;
   border-radius: 12px;
   transition: all 0.3s;
+  justify-content: center;
 }
 
 .downloadBtn:hover {
@@ -599,6 +602,87 @@
 .downloadBtnPlatform {
   font-weight: 600;
   font-size: 1.1rem;
+}
+
+.installCard {
+  background: linear-gradient(135deg, rgba(75, 183, 255, 0.12), rgba(245, 160, 74, 0.12));
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.5rem;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.installHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.installHeader svg {
+  width: 28px;
+  height: 28px;
+}
+
+.installLabel {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.installPlatform {
+  display: block;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.installHint {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.installCmd {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.installCmd code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  word-break: break-all;
+  flex: 1 1 280px;
+}
+
+.copyBtn {
+  border: none;
+  background: var(--accent-cyan);
+  color: #0b0d12;
+  font-weight: 600;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.copyBtn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(75, 183, 255, 0.25);
+}
+
+.installNote {
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 .techBadge {
@@ -759,9 +843,8 @@
     grid-template-columns: 1fr;
   }
 
-  .downloadButtons {
-    flex-direction: column;
-    align-items: center;
+  .downloadGrid {
+    grid-template-columns: 1fr;
   }
 
   .footer {

@@ -1,19 +1,19 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;600;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
 :root {
-  --bg-deep: #0a0a0c;
-  --bg-surface: #111114;
-  --bg-elevated: #1a1a1f;
-  --border: #2a2a32;
-  --text-primary: #f0f0f2;
-  --text-secondary: #8a8a96;
-  --text-muted: #5a5a66;
-  --accent-cyan: #00d4aa;
-  --accent-magenta: #ff3d8a;
-  --accent-purple: #8b5cf6;
-  --accent-orange: #ff9f43;
-  --glow-cyan: rgba(0, 212, 170, 0.3);
-  --glow-magenta: rgba(255, 61, 138, 0.3);
+  --bg-deep: #0b0d12;
+  --bg-surface: #141822;
+  --bg-elevated: #1b2130;
+  --border: #2a3242;
+  --text-primary: #f5f7fb;
+  --text-secondary: #9aa4b2;
+  --text-muted: #6d7685;
+  --accent-cyan: #4bb7ff;
+  --accent-magenta: #f5a04a;
+  --accent-purple: #f06b6b;
+  --accent-orange: #f2c14e;
+  --glow-cyan: rgba(75, 183, 255, 0.3);
+  --glow-magenta: rgba(245, 160, 74, 0.3);
 }
 
 * {
@@ -27,8 +27,11 @@ html {
 }
 
 body {
-  font-family: 'Outfit', sans-serif;
-  background: var(--bg-deep);
+  font-family: 'Space Grotesk', sans-serif;
+  background:
+    radial-gradient(1200px 600px at 5% -10%, rgba(75, 183, 255, 0.18), transparent 60%),
+    radial-gradient(1000px 500px at 95% 0%, rgba(245, 160, 74, 0.18), transparent 55%),
+    var(--bg-deep);
   color: var(--text-primary);
   line-height: 1.6;
   overflow-x: hidden;
@@ -58,7 +61,7 @@ a {
 }
 
 ::selection {
-  background: var(--accent-cyan);
+  background: var(--accent-magenta);
   color: var(--bg-deep);
 }
 

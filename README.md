@@ -19,11 +19,19 @@ Messenger desktop app with extra features.
 
 ## Install
 
+### macOS (one-line installer)
+
+Run in Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pcstyleorg/messenger-desktop/main/install.sh | bash
+```
+
 ### From Releases
 
 Download from [Releases](../../releases):
 
-- **macOS**: `.dmg`
+- **macOS**: `.dmg` (manual install)
 - **Windows**: `.exe`
 
 ### Build from source
