@@ -79,7 +79,7 @@ export function createChatHead(initialSrc?: string) {
   const html = `
     <html>
       <body style="margin:0; padding:5px; overflow:hidden; background:transparent; -webkit-app-region: drag;">
-        <div id="avatar" style="width:54px; height:54px; border-radius:50%; background-color:#333; background-size:cover; background-position:center; border:3px solid #7b61ff; box-shadow: 0 4px 12px rgba(0,0,0,0.5); cursor:pointer; transition: transform 0.1s; display:flex; align-items:center; justify-content:center; color:#fff; font-family: sans-serif; font-weight: 700;">M</div>
+        <div id="avatar" style="width:54px; height:54px; border-radius:50%; background-color:#333; background-size:cover; background-position:center; border:3px solid #7b61ff; box-shadow: 0 4px 12px rgba(0,0,0,0.5); cursor:pointer; transition: transform 0.1s; display:flex; align-items:center; justify-content:center; color:#fff; font-family: sans-serif; font-weight: 700; -webkit-app-region: no-drag;">M</div>
         <script>
           const avatar = document.getElementById('avatar');
           const setAvatar = (src) => {

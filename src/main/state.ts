@@ -32,6 +32,7 @@ export const store = new Store({
     modernLook: false,
     floatingGlass: false,
     androidBubbles: false,
+    experimentalEnabled: false,
     quietHoursEnabled: false,
     quietHoursStart: "22:00",
     quietHoursEnd: "07:00",

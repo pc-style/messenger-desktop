@@ -162,7 +162,7 @@ function showSettingsModal(config: any) {
   mainTitle.style.cssText = `margin: 0; font-size: 20px; font-weight: 700; color: ${textColor};`
 
   subTitle = document.createElement("div")
-  subTitle.textContent = `v${config.version || "2.0.1"} — Settings`
+  subTitle.textContent = `v${config.version || "2.0.2"} — Settings`
   subTitle.style.cssText = `font-size: 12px; color: ${subTextColor}; font-weight: 500; margin-top: 2px;`
 
   titleGroup.append(mainTitle, subTitle)
@@ -212,6 +212,36 @@ function showSettingsModal(config: any) {
     toggle.onclick = () => {
       const active = toggle.classList.toggle("active")
       ipcRenderer.send("update-setting", { key, value: active })
+    }
+
+    row.append(info, toggle)
+    return row
+  }
+
+  const createExperimentalAccessRow = (enabled) => {
+    const row = document.createElement("div")
+    row.className = "settings-row"
+
+    const info = document.createElement("div")
+    const l = document.createElement("div")
+    l.className = "settings-label"
+    l.textContent = "Allow Experimental Options"
+    const d = document.createElement("div")
+    d.className = "settings-desc"
+    d.textContent = enabled
+      ? "Experimental options are unlocked."
+      : "Unlock features that may be unstable or break ToS."
+    info.append(l, d)
+
+    const toggle = document.createElement("div")
+    toggle.className = `toggle ${enabled ? "active" : ""}`
+    const knob = document.createElement("div")
+    knob.className = "toggle-knob"
+    toggle.appendChild(knob)
+
+    toggle.onclick = () => {
+      overlay.remove()
+      ipcRenderer.send("set-experimental-access", { enabled: !enabled })
     }
 
     row.append(info, toggle)
@@ -297,14 +327,6 @@ function showSettingsModal(config: any) {
   )
   privacySection.append(
     createToggleRow(
-      "[EXP] Typing Overlay (Better Typing Block)",
-      "Experimental: hides typing by using a proxy input overlay.",
-      "expTypingOverlay",
-      config.expTypingOverlay
-    )
-  )
-  privacySection.append(
-    createToggleRow(
       "Clipboard Sanitizer",
       "Remove tracking data from pasted URLs.",
       "clipboardSanitize",
@@ -346,14 +368,6 @@ function showSettingsModal(config: any) {
       "Premium glassmorphism aesthetics.",
       "floatingGlass",
       config.floatingGlass
-    )
-  )
-  appearanceSection.append(
-    createToggleRow(
-      "[EXP] Android Bubbles",
-      "Rounded Android-style chat bubbles.",
-      "androidBubbles",
-      config.androidBubbles
     )
   )
   appearanceSection.append(
@@ -403,6 +417,7 @@ function showSettingsModal(config: any) {
       config.doNotDisturb
     )
   )
+  systemSection.append(createExperimentalAccessRow(!!config.experimentalEnabled))
   systemSection.append(
     createToggleRow(
       "Always on Top",
@@ -570,8 +585,49 @@ function showSettingsModal(config: any) {
   const systemPanel = makePanel("system", "System & Tools", systemSection)
   const powerPanel = makePanel("power", "Power Tools", powerSection)
   const shortcutsPanel = makePanel("shortcuts", "Keyboard Shortcuts", shortcutSection)
+  const experimentalSection = document.createElement("div")
+  experimentalSection.className = "settings-section"
+  const experimentalTitle = document.createElement("h4")
+  experimentalTitle.textContent = "Experimental"
+  experimentalSection.append(experimentalTitle)
 
-  panels.append(appearancePanel, privacyPanel, systemPanel, powerPanel, shortcutsPanel)
+  if (!config.experimentalEnabled) {
+    const warn = document.createElement("div")
+    warn.className = "settings-desc"
+    warn.style.fontSize = "13px"
+    warn.style.marginBottom = "12px"
+    warn.textContent =
+      'Experimental options may be unstable, break ToS, or make the app unusable. Unlock them from System settings.'
+    experimentalSection.append(warn)
+  } else {
+    experimentalSection.append(
+      createToggleRow(
+        "Typing Overlay (Better Typing Block)",
+        "Experimental: hides typing by using a proxy input overlay.",
+        "expTypingOverlay",
+        config.expTypingOverlay
+      )
+    )
+    experimentalSection.append(
+      createToggleRow(
+        "Android Bubbles",
+        "Rounded Android-style chat bubbles.",
+        "androidBubbles",
+        config.androidBubbles
+      )
+    )
+  }
+
+  const experimentalPanel = makePanel("experimental", "Experimental", experimentalSection)
+
+  panels.append(
+    appearancePanel,
+    privacyPanel,
+    systemPanel,
+    powerPanel,
+    shortcutsPanel,
+    experimentalPanel
+  )
 
   const tabItems = [
     { id: "appearance", label: "Appearance" },
@@ -579,6 +635,7 @@ function showSettingsModal(config: any) {
     { id: "system", label: "System" },
     { id: "power", label: "Power Tools" },
     { id: "shortcuts", label: "Shortcuts" },
+    { id: "experimental", label: "Experimental" },
   ]
 
   const setActiveTab = (id) => {

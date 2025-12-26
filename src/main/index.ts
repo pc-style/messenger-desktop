@@ -58,6 +58,7 @@ let typingBlockerHandler: ((details: any, callback: any) => void) | null = null;
 let quietHoursTimer: NodeJS.Timeout | null = null;
 let shortcutsRegistered = false;
 let shortcutsDirty = true;
+let localProbeBlockerInstalled = false;
 
 // combine uploaded body buffers into string
 function getRequestBody(details) {
@@ -328,6 +329,17 @@ function updateRequestBlocker() {
     console.log(`\x1b[35m[Unleashed] [BLOCKER] Active | Read: ${blockReadReceipts} | Typing: ${blockTypingIndicator}\x1b[0m`);
     session.defaultSession.webRequest.onBeforeRequest(filter, requestBlockerHandler);
   }
+}
+
+function installLocalProbeBlocker() {
+  if (localProbeBlockerInstalled) return;
+  localProbeBlockerInstalled = true;
+  try {
+    session.defaultSession.webRequest.onBeforeRequest(
+      { urls: ["http://localhost:3103/*"] },
+      (_, callback) => callback({ cancel: true })
+    );
+  } catch (_) {}
 }
 
 function getAllFramesForWebContents(contents) {
@@ -1650,6 +1662,7 @@ function openSettingsUI() {
     modernLook: store.get("modernLook"),
     floatingGlass: store.get("floatingGlass"),
     androidBubbles: store.get("androidBubbles"),
+    experimentalEnabled: store.get("experimentalEnabled"),
     theme: store.get("theme"),
     windowOpacity: store.get("windowOpacity"),
     alwaysOnTop: store.get("alwaysOnTop"),
@@ -1669,6 +1682,18 @@ function openSettingsUI() {
 
 
 ipcMain.on("update-setting", (event, { key, value }) => {
+  const experimentalKeys = new Set(["androidBubbles", "expTypingOverlay"]);
+  if (key === "experimentalEnabled") return;
+  if (experimentalKeys.has(key) && !store.get("experimentalEnabled")) {
+    if (mainWindow) {
+      mainWindow.webContents.send("show-toast", {
+        message: "Enable Experimental Options to use this feature.",
+        tone: "warning",
+      });
+    }
+    return;
+  }
+
   store.set(key, value);
   
   // Handle specific side effects
@@ -1735,6 +1760,34 @@ ipcMain.on("update-setting", (event, { key, value }) => {
   updateMenu();
 });
 
+ipcMain.on("set-experimental-access", async (event, { enabled }) => {
+  if (!mainWindow) return;
+  if (!enabled) {
+    store.set("experimentalEnabled", false);
+    openSettingsUI();
+    return;
+  }
+
+  const value = await openInputDialog({
+    title: "Enable Experimental Options",
+    message:
+      'Experimental features may be unstable, break ToS, or make the app unusable. Type "I acknowledge" to continue.',
+    defaultValue: "",
+    multiline: false,
+  });
+
+  if (!value) return;
+  if (value.trim().toLowerCase() === "i acknowledge") {
+    store.set("experimentalEnabled", true);
+    openSettingsUI();
+  } else {
+    dialog.showErrorBox(
+      "Experimental Options",
+      'Confirmation failed. Type "I acknowledge" to enable experimental options.'
+    );
+  }
+});
+
 ipcMain.on("edit-custom-css", () => {
   editCustomCSS();
 });
@@ -1757,10 +1810,14 @@ ipcMain.on("open-settings", () => {
 
 ipcMain.on("pick-theme", async () => {
   if (!mainWindow) return;
+  const allowExperimental = store.get("experimentalEnabled");
+  const options = allowExperimental
+    ? THEME_OPTIONS
+    : THEME_OPTIONS.filter((option) => option.id !== "alternative");
   const choice = await openSelectionDialog({
     title: "Choose Theme",
     message: "Select a theme for Messenger Unleashed.",
-    options: THEME_OPTIONS,
+    options,
   });
   if (choice) {
     applyTheme(choice);
@@ -1986,6 +2043,7 @@ function updateMenu() {
   const windowOpacity = store.get("windowOpacity");
   const customCSS = store.get("customCSS");
   const androidBubbles = store.get("androidBubbles");
+  const experimentalEnabled = store.get("experimentalEnabled");
   const quietHoursEnabled = store.get("quietHoursEnabled");
   const quietHoursStart = store.get("quietHoursStart");
   const quietHoursEnd = store.get("quietHoursEnd");
@@ -2064,6 +2122,7 @@ function updateMenu() {
               type: "checkbox",
               checked: expTypingOverlay,
               click: toggleExpTypingOverlay,
+              visible: experimentalEnabled,
             },
             { type: "separator" },
             {
@@ -2129,6 +2188,7 @@ function updateMenu() {
                   type: "radio",
                   checked: theme === "alternative",
                   click: () => applyTheme("alternative"),
+                  visible: experimentalEnabled,
                 },
                 { type: "separator" },
                 {
@@ -2228,6 +2288,7 @@ function updateMenu() {
               type: "checkbox",
               checked: androidBubbles,
               click: toggleAndroidBubbles,
+              visible: experimentalEnabled,
             },
             {
               label: "Focus Mode",
@@ -2610,6 +2671,7 @@ function createWindow() {
     { useSystemPicker: process.platform === "darwin" }
   );
 
+  installLocalProbeBlocker();
   // apply request blockers before loading content (read receipts + typing indicator)
   updateRequestBlocker();
 
