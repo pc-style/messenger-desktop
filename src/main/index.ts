@@ -3081,7 +3081,7 @@ function createWindow() {
       });
     }
 
-    if (linkURL && !linkURL.startsWith("javascript:")) {
+    if (linkURL && !linkURL.match(/^(javascript|data|vbscript|file):/i)) {
       menuItems.push({
         label: "Open Link in Browser",
         click: () => shell.openExternal(linkURL),
