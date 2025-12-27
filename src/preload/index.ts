@@ -1129,8 +1129,9 @@ function setupUnsendDetection() {
           node.matches?.('div[data-testid*="message"]')
 
         if (isMessageContainer) {
-          const textEl = node.querySelector?.('div[dir="auto"]')
-          const text = (textEl as HTMLElement)?.innerText?.trim()
+          // use the already-found element if it's a div[dir="auto"], otherwise query
+          const textEl = (node.matches?.('div[dir="auto"]') ? node : node.querySelector?.('div[dir="auto"]')) as HTMLElement | null
+          const text = textEl?.innerText?.trim()
 
           if (text && text.length > 2) {
             console.log('[Unleashed] Message unsent detected:', text.slice(0, 100))
@@ -1252,11 +1253,15 @@ function setupAutoReply() {
           const chatId = chatLink?.getAttribute('href') || 'unknown'
 
           if (!repliedChats.has(chatId)) {
-            repliedChats.set(chatId, Date.now())
+            const replyTimestamp = Date.now()
+            repliedChats.set(chatId, replyTimestamp)
             cleanupRepliedChats()
 
+            // capture enabled state at schedule time
+            const wasEnabled = autoReplyEnabled
             setTimeout(() => {
-              if (autoReplyEnabled) {
+              // double-check still enabled and this is still the scheduled reply
+              if (wasEnabled && autoReplyEnabled && repliedChats.get(chatId) === replyTimestamp) {
                 const success = sendAutoReply()
                 if (success) {
                   showToast('Auto-reply sent', { tone: 'info', duration: 2000 })
@@ -1467,9 +1472,12 @@ ipcRenderer.on('show-conversation-stats', () => {
 
   const modal = document.createElement('div')
   modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:999999;'
+  // escape HTML to prevent XSS via malicious chat names
+  const escapeHtml = (str: string) => str.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c))
+  const safeChatName = escapeHtml(chatName)
   modal.innerHTML = `
     <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:16px;padding:24px 32px;min-width:320px;box-shadow:0 20px 60px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.1);">
-      <h2 style="margin:0 0 20px;color:white;font-size:18px;">📊 ${chatName}</h2>
+      <h2 style="margin:0 0 20px;color:white;font-size:18px;">📊 ${safeChatName}</h2>
       <div style="display:grid;gap:12px;">
         <div style="display:flex;justify-content:space-between;color:rgba(255,255,255,0.8);"><span>Total Messages</span><strong style="color:#6366f1">${total}</strong></div>
         <div style="display:flex;justify-content:space-between;color:rgba(255,255,255,0.8);"><span>Your Messages</span><strong style="color:#22c55e">${yours} (${yourPct}%)</strong></div>
@@ -1514,9 +1522,9 @@ ipcRenderer.on('export-conversation-request', () => {
       row.querySelector?.('[data-testid*="outgoing"]') ||
       row.closest?.('[data-testid*="outgoing"]')
 
-    // try to find timestamp
+    // try to find timestamp (use null if not found rather than fabricating one)
     const timeEl = row.querySelector('time') || row.querySelector('[datetime]')
-    const time = timeEl?.getAttribute('datetime') || timeEl?.innerText || new Date().toISOString()
+    const time = timeEl?.getAttribute('datetime') || timeEl?.innerText || null
 
     messages.push({
       sender: isOutgoing ? 'You' : chatName,
