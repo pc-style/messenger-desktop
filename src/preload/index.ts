@@ -1070,13 +1070,19 @@ let unsendObserver: MutationObserver | null = null
 let unsendScanInterval: ReturnType<typeof setInterval> | null = null
 
 function generateMessageId(parent: Element, el: Element): string {
-  const testId = parent.getAttribute('data-testid')
-  if (testId) return testId
+  // prefer stable messenger-specific IDs
+  const msgId = parent.getAttribute('data-message-id') || parent.getAttribute('data-testid')
+  if (msgId) return msgId
 
-  const ariaLabel = parent.getAttribute('aria-label')
+  // fallback: timestamp + position-based ID (more stable than text content)
+  const timeEl = parent.querySelector('time')
+  const timestamp = timeEl?.getAttribute('datetime') || ''
+  const rowIndex = parent.getAttribute('data-row-index') || ''
+  if (timestamp) return `${timestamp}-${rowIndex}`
+
+  // last resort: text-based hash
   const text = (el as HTMLElement).innerText || ''
-  const textHash = text.slice(0, 100) + '-' + text.length
-  return ariaLabel ? `${ariaLabel}-${textHash}` : textHash
+  return `text-${text.length}-${text.slice(0, 50).replace(/\s/g, '')}`
 }
 
 function setupUnsendDetection() {
@@ -1101,7 +1107,7 @@ function setupUnsendDetection() {
       }
     })
 
-    // cleanup old messages (older than 1 hour) and limit size
+    // cleanup old messages (older than 1 hour)
     const oneHourAgo = Date.now() - 3600000
     const maxSize = 500
     for (const [key, value] of messageCache.entries()) {
@@ -1109,11 +1115,12 @@ function setupUnsendDetection() {
         messageCache.delete(key)
       }
     }
-    // limit cache size
+    // limit cache size by removing oldest entries
     if (messageCache.size > maxSize) {
       const entries = Array.from(messageCache.entries())
       entries.sort((a, b) => a[1].timestamp - b[1].timestamp)
-      entries.slice(0, entries.length - maxSize).forEach(([k]) => messageCache.delete(k))
+      const toRemove = messageCache.size - maxSize
+      entries.slice(0, toRemove).forEach(([k]) => messageCache.delete(k))
     }
   }
 
@@ -1185,6 +1192,7 @@ let autoReplyEnabled = false
 let autoReplyMessage = "I'm currently away. I'll get back to you soon!"
 const repliedChats = new Map<string, number>() // chatId -> timestamp
 let autoReplyObserver: MutationObserver | null = null
+const pendingAutoReplies = new Map<string, ReturnType<typeof setTimeout>>() // track pending timeouts
 const MAX_REPLIED_CHATS = 100
 
 function sendAutoReply() {
@@ -1248,7 +1256,12 @@ function setupAutoReply() {
         const isIncoming = node.matches?.('div[data-testid*="incoming"]') ||
           node.querySelector?.('div[data-testid*="incoming"]')
 
-        if (isIncoming) {
+        // verify it's not our own message (check for outgoing indicators)
+        const isOutgoing = node.matches?.('[data-testid*="outgoing"]') ||
+          node.querySelector?.('[data-testid*="outgoing"]') ||
+          node.closest?.('[class*="outgoing"]')
+
+        if (isIncoming && !isOutgoing) {
           const chatLink = document.querySelector('a[aria-current="page"]')
           const chatId = chatLink?.getAttribute('href') || 'unknown'
 
@@ -1257,17 +1270,17 @@ function setupAutoReply() {
             repliedChats.set(chatId, replyTimestamp)
             cleanupRepliedChats()
 
-            // capture enabled state at schedule time
-            const wasEnabled = autoReplyEnabled
-            setTimeout(() => {
-              // double-check still enabled and this is still the scheduled reply
-              if (wasEnabled && autoReplyEnabled && repliedChats.get(chatId) === replyTimestamp) {
+            // schedule reply with cancellation support
+            const timeoutId = setTimeout(() => {
+              pendingAutoReplies.delete(chatId)
+              if (autoReplyEnabled && repliedChats.get(chatId) === replyTimestamp) {
                 const success = sendAutoReply()
                 if (success) {
                   showToast('Auto-reply sent', { tone: 'info', duration: 2000 })
                 }
               }
             }, 2000 + Math.random() * 3000)
+            pendingAutoReplies.set(chatId, timeoutId)
           }
         }
       })
@@ -1284,6 +1297,9 @@ ipcRenderer.on('set-auto-reply', (_, enabled) => {
     repliedChats.clear()
     setupAutoReply()
   } else {
+    // cancel all pending auto-replies
+    pendingAutoReplies.forEach(timeoutId => clearTimeout(timeoutId))
+    pendingAutoReplies.clear()
     // cleanup observer when disabled
     if (autoReplyObserver) {
       autoReplyObserver.disconnect()
@@ -1391,23 +1407,29 @@ ipcRenderer.on('show-conversation-search', () => {
 
     textNodes.forEach(node => {
       const text = node.textContent || ''
-      const idx = text.toLowerCase().indexOf(query)
-      if (idx === -1) return
-
-      const span = document.createElement('span')
-      span.className = 'unleashed-highlight'
-      span.style.cssText = 'background: yellow; color: black; border-radius: 2px;'
-      span.textContent = text.slice(idx, idx + query.length)
-
+      const lowerText = text.toLowerCase()
       const parent = node.parentNode
-      if (parent) {
-        const frag = document.createDocumentFragment()
-        if (idx > 0) frag.appendChild(document.createTextNode(text.slice(0, idx)))
+      if (!parent) return
+
+      // find all occurrences
+      const frag = document.createDocumentFragment()
+      let lastIdx = 0
+      let idx = lowerText.indexOf(query)
+
+      while (idx !== -1) {
+        if (idx > lastIdx) frag.appendChild(document.createTextNode(text.slice(lastIdx, idx)))
+        const span = document.createElement('span')
+        span.className = 'unleashed-highlight'
+        span.style.cssText = 'background: yellow; color: black; border-radius: 2px;'
+        span.textContent = text.slice(idx, idx + query.length)
         frag.appendChild(span)
-        if (idx + query.length < text.length) frag.appendChild(document.createTextNode(text.slice(idx + query.length)))
-        parent.replaceChild(frag, node)
         matches.push(span)
+        lastIdx = idx + query.length
+        idx = lowerText.indexOf(query, lastIdx)
       }
+
+      if (lastIdx < text.length) frag.appendChild(document.createTextNode(text.slice(lastIdx)))
+      parent.replaceChild(frag, node)
     })
 
     countEl.textContent = matches.length ? `${matches.length} found` : 'No matches'
@@ -1472,8 +1494,8 @@ ipcRenderer.on('show-conversation-stats', () => {
 
   const modal = document.createElement('div')
   modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:999999;'
-  // escape HTML to prevent XSS via malicious chat names
-  const escapeHtml = (str: string) => str.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c))
+  // escape HTML via DOM to prevent XSS
+  const escapeHtml = (str: string) => { const d = document.createElement('div'); d.textContent = str; return d.innerHTML }
   const safeChatName = escapeHtml(chatName)
   modal.innerHTML = `
     <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:16px;padding:24px 32px;min-width:320px;box-shadow:0 20px 60px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.1);">
