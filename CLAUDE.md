@@ -119,3 +119,13 @@ All settings stored via `electron-store` in:
 - Windows: `%APPDATA%/messenger-unleashed/config.json`
 
 Settings survive app restarts but not uninstall.
+
+## AI Agent Guidelines
+
+After completing any significant change (new features, refactors, architecture changes, or multi-file edits), run:
+
+```bash
+coderabbit review --plain
+```
+
+This ensures code quality and catches potential issues before committing.

@@ -1060,3 +1060,503 @@ function setupInvisibleInk() {
   
   decodeObserver.observe(document.body, { childList: true, subtree: true, characterData: true })
 }
+
+// --- Unsend Detection ---
+// tracks messages to detect when someone unsends a message
+
+const messageCache = new Map()
+let unsendDetectionEnabled = false
+let unsendObserver: MutationObserver | null = null
+let unsendScanInterval: ReturnType<typeof setInterval> | null = null
+
+function generateMessageId(parent: Element, el: Element): string {
+  // prefer stable messenger-specific IDs
+  const msgId = parent.getAttribute('data-message-id') || parent.getAttribute('data-testid')
+  if (msgId) return msgId
+
+  // fallback: timestamp + position-based ID (more stable than text content)
+  const timeEl = parent.querySelector('time')
+  const timestamp = timeEl?.getAttribute('datetime') || ''
+  const rowIndex = parent.getAttribute('data-row-index') || ''
+  if (timestamp) return `${timestamp}-${rowIndex}`
+
+  // last resort: text-based hash
+  const text = (el as HTMLElement).innerText || ''
+  return `text-${text.length}-${text.slice(0, 50).replace(/\s/g, '')}`
+}
+
+function setupUnsendDetection() {
+  // prevent duplicate observers
+  if (unsendObserver) return
+
+  const scanMessages = () => {
+    const messageElements = document.querySelectorAll('div[dir="auto"]')
+    messageElements.forEach((el) => {
+      const parent = el.closest('div[role="row"]') || el.closest('div[data-testid]')
+      if (!parent) return
+
+      const id = generateMessageId(parent, el)
+      if (!id) return
+
+      const text = (el as HTMLElement).innerText?.trim()
+      if (text && text.length > 0 && !messageCache.has(id)) {
+        messageCache.set(id, {
+          text,
+          timestamp: Date.now()
+        })
+      }
+    })
+
+    // cleanup old messages (older than 1 hour)
+    const oneHourAgo = Date.now() - 3600000
+    const maxSize = 500
+    for (const [key, value] of messageCache.entries()) {
+      if (value.timestamp < oneHourAgo) {
+        messageCache.delete(key)
+      }
+    }
+    // limit cache size by removing oldest entries
+    if (messageCache.size > maxSize) {
+      const entries = Array.from(messageCache.entries())
+      entries.sort((a, b) => a[1].timestamp - b[1].timestamp)
+      const toRemove = messageCache.size - maxSize
+      entries.slice(0, toRemove).forEach(([k]) => messageCache.delete(k))
+    }
+  }
+
+  unsendObserver = new MutationObserver((mutations) => {
+    if (!unsendDetectionEnabled) return
+
+    mutations.forEach((mutation) => {
+      mutation.removedNodes.forEach((node) => {
+        if (!(node instanceof HTMLElement)) return
+
+        const isMessageContainer = node.querySelector?.('div[dir="auto"]') ||
+          node.matches?.('div[role="row"]') ||
+          node.matches?.('div[data-testid*="message"]')
+
+        if (isMessageContainer) {
+          // use the already-found element if it's a div[dir="auto"], otherwise query
+          const textEl = (node.matches?.('div[dir="auto"]') ? node : node.querySelector?.('div[dir="auto"]')) as HTMLElement | null
+          const text = textEl?.innerText?.trim()
+
+          if (text && text.length > 2) {
+            console.log('[Unleashed] Message unsent detected:', text.slice(0, 100))
+
+            if (window.electronAPI?.showNotification) {
+              window.electronAPI.showNotification('Message Unsent', {
+                body: `"${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`,
+                silent: false
+              })
+            }
+
+            showToast(`📩 Unsent: "${text.slice(0, 40)}${text.length > 40 ? '...' : ''}"`, {
+              tone: 'warning',
+              duration: 5000
+            })
+          }
+        }
+      })
+    })
+
+    scanMessages()
+  })
+
+  const messageArea = document.querySelector('div[aria-label="Messages"]') || document.body
+  unsendObserver.observe(messageArea, { childList: true, subtree: true })
+
+  scanMessages()
+  unsendScanInterval = setInterval(scanMessages, 5000)
+}
+
+ipcRenderer.on('set-unsend-detection', (_, enabled) => {
+  unsendDetectionEnabled = enabled
+  if (enabled && document.body) {
+    setupUnsendDetection()
+  } else {
+    // cleanup when disabled
+    if (unsendObserver) {
+      unsendObserver.disconnect()
+      unsendObserver = null
+    }
+    if (unsendScanInterval) {
+      clearInterval(unsendScanInterval)
+      unsendScanInterval = null
+    }
+    messageCache.clear()
+  }
+})
+
+// --- Auto-Reply (Away Mode) ---
+let autoReplyEnabled = false
+let autoReplyMessage = "I'm currently away. I'll get back to you soon!"
+const repliedChats = new Map<string, number>() // chatId -> timestamp
+let autoReplyObserver: MutationObserver | null = null
+const pendingAutoReplies = new Map<string, ReturnType<typeof setTimeout>>() // track pending timeouts
+const MAX_REPLIED_CHATS = 100
+
+function sendAutoReply() {
+  const input = document.querySelector('div[role="textbox"][contenteditable="true"]') ||
+    document.querySelector('div[aria-label="Message"]') ||
+    document.querySelector('div[contenteditable="true"]')
+
+  if (!input) return false
+
+  input.focus()
+
+  const selection = window.getSelection()
+  const range = document.createRange()
+  selection?.removeAllRanges()
+  range.selectNodeContents(input)
+  selection?.addRange(range)
+  document.execCommand('delete', false, null)
+  document.execCommand('insertText', false, autoReplyMessage)
+
+  input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: autoReplyMessage }))
+
+  setTimeout(() => {
+    const enterEvent = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      bubbles: true,
+      cancelable: true
+    })
+    input.dispatchEvent(enterEvent)
+  }, 100)
+
+  return true
+}
+
+function cleanupRepliedChats() {
+  // remove entries older than 24 hours and limit size
+  const dayAgo = Date.now() - 86400000
+  for (const [key, timestamp] of repliedChats.entries()) {
+    if (timestamp < dayAgo) repliedChats.delete(key)
+  }
+  // limit size by removing oldest entries
+  if (repliedChats.size > MAX_REPLIED_CHATS) {
+    const entries = Array.from(repliedChats.entries())
+    entries.sort((a, b) => a[1] - b[1])
+    entries.slice(0, entries.length - MAX_REPLIED_CHATS).forEach(([k]) => repliedChats.delete(k))
+  }
+}
+
+function setupAutoReply() {
+  // prevent duplicate observers
+  if (autoReplyObserver) return
+
+  autoReplyObserver = new MutationObserver((mutations) => {
+    if (!autoReplyEnabled) return
+
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (!(node instanceof HTMLElement)) return
+
+        const isIncoming = node.matches?.('div[data-testid*="incoming"]') ||
+          node.querySelector?.('div[data-testid*="incoming"]')
+
+        // verify it's not our own message (check for outgoing indicators)
+        const isOutgoing = node.matches?.('[data-testid*="outgoing"]') ||
+          node.querySelector?.('[data-testid*="outgoing"]') ||
+          node.closest?.('[class*="outgoing"]')
+
+        if (isIncoming && !isOutgoing) {
+          const chatLink = document.querySelector('a[aria-current="page"]')
+          const chatId = chatLink?.getAttribute('href') || 'unknown'
+
+          if (!repliedChats.has(chatId)) {
+            const replyTimestamp = Date.now()
+            repliedChats.set(chatId, replyTimestamp)
+            cleanupRepliedChats()
+
+            // schedule reply with cancellation support
+            const timeoutId = setTimeout(() => {
+              pendingAutoReplies.delete(chatId)
+              if (autoReplyEnabled && repliedChats.get(chatId) === replyTimestamp) {
+                const success = sendAutoReply()
+                if (success) {
+                  showToast('Auto-reply sent', { tone: 'info', duration: 2000 })
+                }
+              }
+            }, 2000 + Math.random() * 3000)
+            pendingAutoReplies.set(chatId, timeoutId)
+          }
+        }
+      })
+    })
+  })
+
+  const messageArea = document.querySelector('div[aria-label="Messages"]') || document.body
+  autoReplyObserver.observe(messageArea, { childList: true, subtree: true })
+}
+
+ipcRenderer.on('set-auto-reply', (_, enabled) => {
+  autoReplyEnabled = enabled
+  if (enabled) {
+    repliedChats.clear()
+    setupAutoReply()
+  } else {
+    // cancel all pending auto-replies
+    pendingAutoReplies.forEach(timeoutId => clearTimeout(timeoutId))
+    pendingAutoReplies.clear()
+    // cleanup observer when disabled
+    if (autoReplyObserver) {
+      autoReplyObserver.disconnect()
+      autoReplyObserver = null
+    }
+  }
+})
+
+ipcRenderer.on('set-auto-reply-message', (_, message) => {
+  if (typeof message === 'string') {
+    autoReplyMessage = message
+  }
+})
+
+// --- Link Preview Blocking ---
+let linkPreviewBlocking = false
+
+ipcRenderer.on('set-link-preview-blocking', (_, enabled) => {
+  linkPreviewBlocking = enabled
+  if (enabled) {
+    const style = document.createElement('style')
+    style.id = 'unleashed-link-preview-block'
+    style.textContent = `
+      div[role="link"],
+      a[role="link"] > div[style*="border-radius"],
+      div[data-testid*="link-preview"],
+      div[data-testid*="url-preview"] {
+        display: none !important;
+      }
+    `
+    document.head.appendChild(style)
+  } else {
+    const existing = document.getElementById('unleashed-link-preview-block')
+    if (existing) existing.remove()
+  }
+})
+
+// --- Conversation Search ---
+let searchOverlay: HTMLElement | null = null
+
+ipcRenderer.on('show-conversation-search', () => {
+  if (searchOverlay) {
+    searchOverlay.style.display = 'flex'
+    const input = searchOverlay.querySelector('input')
+    if (input) (input as HTMLInputElement).focus()
+    return
+  }
+
+  searchOverlay = document.createElement('div')
+  searchOverlay.id = 'unleashed-search-overlay'
+  searchOverlay.innerHTML = `
+    <div style="
+      position: fixed; top: 60px; right: 20px;
+      background: rgba(30, 30, 35, 0.95);
+      backdrop-filter: blur(10px);
+      border-radius: 12px; padding: 12px 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      z-index: 999999; display: flex; gap: 8px; align-items: center;
+      border: 1px solid rgba(255,255,255,0.1);
+    ">
+      <input type="text" placeholder="Search in conversation..." style="
+        background: rgba(255,255,255,0.1); border: none;
+        padding: 8px 12px; border-radius: 8px;
+        color: white; font-size: 14px; width: 250px; outline: none;
+      " />
+      <span id="search-count" style="color: rgba(255,255,255,0.6); font-size: 12px; min-width: 60px;"></span>
+      <button id="search-prev" style="background: rgba(255,255,255,0.1); border: none; padding: 6px 10px; border-radius: 6px; color: white; cursor: pointer;">▲</button>
+      <button id="search-next" style="background: rgba(255,255,255,0.1); border: none; padding: 6px 10px; border-radius: 6px; color: white; cursor: pointer;">▼</button>
+      <button id="search-close" style="background: rgba(255,255,255,0.1); border: none; padding: 6px 10px; border-radius: 6px; color: white; cursor: pointer;">✕</button>
+    </div>
+  `
+  document.body.appendChild(searchOverlay)
+
+  const input = searchOverlay.querySelector('input') as HTMLInputElement
+  const countEl = searchOverlay.querySelector('#search-count') as HTMLElement
+  let matches: HTMLElement[] = []
+  let currentIndex = -1
+
+  const clearHighlights = () => {
+    const parents = new Set<Node>()
+    document.querySelectorAll('.unleashed-highlight').forEach(el => {
+      const parent = el.parentNode
+      if (parent) {
+        parent.replaceChild(document.createTextNode(el.textContent || ''), el)
+        parents.add(parent)
+      }
+    })
+    parents.forEach(p => p.normalize())
+    matches = []
+    currentIndex = -1
+  }
+
+  const doSearch = () => {
+    clearHighlights()
+    const query = input.value.trim().toLowerCase()
+    if (!query) { countEl.textContent = ''; return }
+
+    const messageArea = document.querySelector('div[aria-label="Messages"]')
+    if (!messageArea) return
+
+    const walker = document.createTreeWalker(messageArea, NodeFilter.SHOW_TEXT)
+    const textNodes: Text[] = []
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text
+      if (node.textContent?.toLowerCase().includes(query)) textNodes.push(node)
+    }
+
+    textNodes.forEach(node => {
+      const text = node.textContent || ''
+      const lowerText = text.toLowerCase()
+      const parent = node.parentNode
+      if (!parent) return
+
+      // find all occurrences
+      const frag = document.createDocumentFragment()
+      let lastIdx = 0
+      let idx = lowerText.indexOf(query)
+
+      while (idx !== -1) {
+        if (idx > lastIdx) frag.appendChild(document.createTextNode(text.slice(lastIdx, idx)))
+        const span = document.createElement('span')
+        span.className = 'unleashed-highlight'
+        span.style.cssText = 'background: yellow; color: black; border-radius: 2px;'
+        span.textContent = text.slice(idx, idx + query.length)
+        frag.appendChild(span)
+        matches.push(span)
+        lastIdx = idx + query.length
+        idx = lowerText.indexOf(query, lastIdx)
+      }
+
+      if (lastIdx < text.length) frag.appendChild(document.createTextNode(text.slice(lastIdx)))
+      parent.replaceChild(frag, node)
+    })
+
+    countEl.textContent = matches.length ? `${matches.length} found` : 'No matches'
+    if (matches.length) { currentIndex = 0; updateCurrent() }
+  }
+
+  const updateCurrent = () => {
+    matches.forEach((el, i) => {
+      el.style.background = i === currentIndex ? 'orange' : 'yellow'
+    })
+    if (matches[currentIndex]) {
+      matches[currentIndex].scrollIntoView({ behavior: 'smooth', block: 'center' })
+      countEl.textContent = `${currentIndex + 1}/${matches.length}`
+    }
+  }
+
+  input.addEventListener('input', doSearch)
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      currentIndex = e.shiftKey ? (currentIndex - 1 + matches.length) % matches.length : (currentIndex + 1) % matches.length
+      updateCurrent()
+    }
+    if (e.key === 'Escape') { clearHighlights(); searchOverlay!.style.display = 'none' }
+  })
+
+  searchOverlay.querySelector('#search-prev')?.addEventListener('click', () => {
+    if (matches.length) { currentIndex = (currentIndex - 1 + matches.length) % matches.length; updateCurrent() }
+  })
+  searchOverlay.querySelector('#search-next')?.addEventListener('click', () => {
+    if (matches.length) { currentIndex = (currentIndex + 1) % matches.length; updateCurrent() }
+  })
+  searchOverlay.querySelector('#search-close')?.addEventListener('click', () => {
+    clearHighlights(); searchOverlay!.style.display = 'none'
+  })
+
+  input.focus()
+})
+
+// --- Conversation Statistics ---
+ipcRenderer.on('show-conversation-stats', () => {
+  const messageArea = document.querySelector('div[aria-label="Messages"]')
+  if (!messageArea) { showToast('No conversation open', { tone: 'warning' }); return }
+
+  const header = document.querySelector('div[role="banner"]')
+  const chatName = header?.querySelector('span')?.innerText || header?.querySelector('h1')?.innerText || 'Conversation'
+
+  const messages = messageArea.querySelectorAll('div[role="row"], div[data-testid*="message"]')
+  let total = 0, yours = 0, theirs = 0, chars = 0, media = 0
+
+  messages.forEach((msg) => {
+    const text = msg.querySelector('div[dir="auto"]')?.textContent?.trim()
+    if (!text) return
+    total++
+    chars += text.length
+    const isOut = msg.matches?.('[data-testid*="outgoing"]') || msg.querySelector?.('[data-testid*="outgoing"]')
+    if (isOut) yours++; else theirs++
+    if (msg.querySelector('img:not([alt=""]), video')) media++
+  })
+
+  const avgLen = total > 0 ? Math.round(chars / total) : 0
+  const yourPct = total > 0 ? Math.round((yours / total) * 100) : 0
+
+  const modal = document.createElement('div')
+  modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:999999;'
+  // escape HTML via DOM to prevent XSS
+  const escapeHtml = (str: string) => { const d = document.createElement('div'); d.textContent = str; return d.innerHTML }
+  const safeChatName = escapeHtml(chatName)
+  modal.innerHTML = `
+    <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:16px;padding:24px 32px;min-width:320px;box-shadow:0 20px 60px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.1);">
+      <h2 style="margin:0 0 20px;color:white;font-size:18px;">📊 ${safeChatName}</h2>
+      <div style="display:grid;gap:12px;">
+        <div style="display:flex;justify-content:space-between;color:rgba(255,255,255,0.8);"><span>Total Messages</span><strong style="color:#6366f1">${total}</strong></div>
+        <div style="display:flex;justify-content:space-between;color:rgba(255,255,255,0.8);"><span>Your Messages</span><strong style="color:#22c55e">${yours} (${yourPct}%)</strong></div>
+        <div style="display:flex;justify-content:space-between;color:rgba(255,255,255,0.8);"><span>Their Messages</span><strong style="color:#f59e0b">${theirs} (${100 - yourPct}%)</strong></div>
+        <div style="display:flex;justify-content:space-between;color:rgba(255,255,255,0.8);"><span>Avg Message Length</span><strong style="color:#06b6d4">${avgLen} chars</strong></div>
+        <div style="display:flex;justify-content:space-between;color:rgba(255,255,255,0.8);"><span>Media Shared</span><strong style="color:#ec4899">${media}</strong></div>
+      </div>
+      <button id="close-stats" style="margin-top:20px;width:100%;padding:10px;background:rgba(255,255,255,0.1);border:none;border-radius:8px;color:white;cursor:pointer;font-size:14px;">Close</button>
+    </div>
+  `
+  document.body.appendChild(modal)
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal || (e.target as HTMLElement).id === 'close-stats') modal.remove()
+  })
+})
+
+// --- Conversation Export ---
+ipcRenderer.on('export-conversation-request', () => {
+  const messages = []
+
+  const header = document.querySelector('div[role="banner"]')
+  const chatNameEl = header?.querySelector('span') || header?.querySelector('h1')
+  const chatName = chatNameEl?.innerText || 'Conversation'
+
+  // scrape all visible messages
+  const messageArea = document.querySelector('div[aria-label="Messages"]')
+  if (!messageArea) {
+    ipcRenderer.send('export-conversation-data', { chatName, messages: [] })
+    return
+  }
+
+  // find all message rows
+  const rows = messageArea.querySelectorAll('div[role="row"], div[data-testid*="message"]')
+
+  rows.forEach((row) => {
+    const textEl = row.querySelector('div[dir="auto"]')
+    const text = textEl?.innerText?.trim()
+    if (!text) return
+
+    // try to determine sender (incoming vs outgoing)
+    const isOutgoing = row.matches?.('[data-testid*="outgoing"]') ||
+      row.querySelector?.('[data-testid*="outgoing"]') ||
+      row.closest?.('[data-testid*="outgoing"]')
+
+    // try to find timestamp (use null if not found rather than fabricating one)
+    const timeEl = row.querySelector('time') || row.querySelector('[datetime]')
+    const time = timeEl?.getAttribute('datetime') || timeEl?.innerText || null
+
+    messages.push({
+      sender: isOutgoing ? 'You' : chatName,
+      text,
+      time,
+      isOutgoing
+    })
+  })
+
+  ipcRenderer.send('export-conversation-data', { chatName, messages })
+})

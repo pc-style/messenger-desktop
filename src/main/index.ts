@@ -12,6 +12,8 @@ import {
   shell,
   globalShortcut,
   Tray,
+  nativeTheme,
+  clipboard,
 } from "electron";
 import fs from "node:fs";
 import path from "node:path";
@@ -385,6 +387,20 @@ function buildWebSocketProxyInstallScript() {
         const lower = text.toLowerCase();
         if (lower.includes('presence') && lower.includes('active')) return true;
         if (lower.includes('active_status')) return true;
+        if (lower.includes('last_active')) return true;
+        if (lower.includes('online_status')) return true;
+        return false;
+      };
+      const shouldBlockReadReceiptPayload = (text) => {
+        if (!text) return false;
+        const lower = text.toLowerCase();
+        if (lower.includes('markread') || lower.includes('mark_read')) return true;
+        if (lower.includes('markseen') || lower.includes('mark_seen')) return true;
+        if (lower.includes('read_receipt')) return true;
+        if (lower.includes('delivery_receipt')) return true;
+        if (lower.includes('seen_timestamp')) return true;
+        if (text.includes('MarkThreadSeen')) return true;
+        if (text.includes('ThreadMarkRead')) return true;
         return false;
       };
 
@@ -395,16 +411,18 @@ function buildWebSocketProxyInstallScript() {
         ws.send = function (data) {
           const blockTypingIndicator = !!window.__unleashedBlockTypingIndicator;
           const blockActiveStatus = !!window.__unleashedBlockActiveStatus;
+          const blockReadReceipts = !!window.__unleashedBlockReadReceipts;
           const debugWebSocketBlocker = !!window.__unleashedDebugWsBlocker;
           const debugWebSocketBlockerDecode = !!window.__unleashedDebugWsBlockerDecode;
           const debugWebSocketTypingTrace = !!window.__unleashedDebugWsTypingTrace;
 
-          if (blockTypingIndicator || blockActiveStatus || debugWebSocketTypingTrace) {
+          if (blockTypingIndicator || blockActiveStatus || blockReadReceipts || debugWebSocketTypingTrace) {
             const decoded = decodePayload(data);
             if (decoded) {
               const isTypingPayload = shouldBlockTypingPayload(decoded);
               const blockTyping = blockTypingIndicator && isTypingPayload;
               const blockActive = blockActiveStatus && shouldBlockActiveStatusPayload(decoded);
+              const blockRead = blockReadReceipts && shouldBlockReadReceiptPayload(decoded);
 
               if (debugWebSocketTypingTrace && isTypingPayload) {
                 let preview = '';
@@ -414,9 +432,9 @@ function buildWebSocketProxyInstallScript() {
                 console.log('[Unleashed] [WS-TYPING] ' + url + ' blocked=' + blockTypingIndicator + preview);
               }
 
-              if (blockTyping || blockActive) {
+              if (blockTyping || blockActive || blockRead) {
                 if (debugWebSocketBlocker) {
-                  const reason = blockTyping ? 'typing' : 'active-status';
+                  const reason = blockTyping ? 'typing' : blockActive ? 'active-status' : 'read-receipt';
                   let preview = '';
                   if (debugWebSocketBlockerDecode) {
                     preview = ' payload=' + decoded.slice(0, 220);
@@ -448,6 +466,7 @@ function syncWebSocketProxyFlags() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const blockTypingIndicator = !!store.get("blockTypingIndicator");
   const blockActiveStatus = !!store.get("blockActiveStatus");
+  const blockReadReceipts = !!store.get("blockReadReceipts");
   const debugWebSocketBlocker =
     process.env.DEBUG_REQUEST_BLOCKER_WS === "1" ||
     process.env.DEBUG_REQUEST_BLOCKER_WS_ALL === "1" ||
@@ -459,6 +478,7 @@ function syncWebSocketProxyFlags() {
     (() => {
       window.__unleashedBlockTypingIndicator = ${blockTypingIndicator ? "true" : "false"};
       window.__unleashedBlockActiveStatus = ${blockActiveStatus ? "true" : "false"};
+      window.__unleashedBlockReadReceipts = ${blockReadReceipts ? "true" : "false"};
       window.__unleashedDebugWsBlocker = ${debugWebSocketBlocker ? "true" : "false"};
       window.__unleashedDebugWsBlockerDecode = ${debugWebSocketBlockerDecode ? "true" : "false"};
       window.__unleashedDebugWsTypingTrace = ${debugWebSocketTypingTrace ? "true" : "false"};
@@ -1005,6 +1025,9 @@ function toggleBlockReadReceipts() {
   // notify preload to update visibility blocking state (additional layer)
   mainWindow.webContents.send("set-block-read-receipts", newValue);
 
+  // sync websocket proxy flags for WebSocket-based read receipts
+  syncWebSocketProxyFlags();
+
   if (!newValue) {
     // reload to restore normal behavior
     mainWindow.webContents.reload();
@@ -1112,6 +1135,7 @@ function pushRendererConfig() {
     scheduleDelayMs: store.get("scheduleDelayMs"),
     blockTypingIndicator: store.get("blockTypingIndicator"),
     androidBubbles: store.get("androidBubbles"),
+    autoReplyMessage: store.get("autoReplyMessage"),
   };
 
   mainWindow.webContents.send("update-config", config);
@@ -1146,7 +1170,7 @@ function toggleBlockTypingIndicator() {
   const current = store.get("blockTypingIndicator");
   const newValue = !current;
   store.set("blockTypingIndicator", newValue);
-  
+
   // Update the unified request blocker
   updateRequestBlocker();
 
@@ -1154,6 +1178,25 @@ function toggleBlockTypingIndicator() {
 
   // notify preload to update typing indicator blocking
   mainWindow.webContents.send("set-block-typing-indicator", newValue);
+  syncWebSocketProxyFlags();
+
+  if (!newValue) {
+    mainWindow.webContents.reload();
+  }
+
+  updateMenu();
+}
+
+function toggleBlockActiveStatus() {
+  const current = store.get("blockActiveStatus");
+  const newValue = !current;
+  store.set("blockActiveStatus", newValue);
+
+  if (!mainWindow) return;
+
+  // notify preload to update active status blocking
+  mainWindow.webContents.send("set-block-active-status", newValue);
+  syncWebSocketProxyFlags();
 
   if (!newValue) {
     mainWindow.webContents.reload();
@@ -1172,12 +1215,231 @@ function toggleExpTypingOverlay() {
   updateMenu();
 }
 
+function toggleUnsendDetection() {
+  const current = store.get("unsendDetection");
+  const newValue = !current;
+  store.set("unsendDetection", newValue);
+
+  if (!mainWindow) return;
+  mainWindow.webContents.send("set-unsend-detection", newValue);
+  updateMenu();
+
+  if (newValue) {
+    mainWindow.webContents.send("show-toast", {
+      message: "Unsend detection enabled. You'll be notified when messages are removed.",
+      tone: "success",
+    });
+  }
+}
+
+function toggleAutoReply() {
+  const current = store.get("autoReplyEnabled");
+  const newValue = !current;
+  store.set("autoReplyEnabled", newValue);
+
+  if (!mainWindow) return;
+  mainWindow.webContents.send("set-auto-reply", newValue);
+  updateMenu();
+
+  if (newValue) {
+    mainWindow.webContents.send("show-toast", {
+      message: "Auto-reply enabled. Incoming messages will receive your away message.",
+      tone: "success",
+    });
+  }
+}
+
+async function editAutoReplyMessage() {
+  if (!mainWindow) return;
+  const existing = store.get("autoReplyMessage");
+
+  const value = await openInputDialog({
+    title: "Auto-Reply Message",
+    message: "Enter your away message:",
+    defaultValue: existing,
+    multiline: true,
+  });
+
+  if (value !== null) {
+    store.set("autoReplyMessage", value);
+    mainWindow.webContents.send("set-auto-reply-message", value);
+    pushRendererConfig();
+    updateMenu();
+
+    mainWindow.webContents.send("show-toast", {
+      message: "Auto-reply message updated.",
+      tone: "success",
+    });
+  }
+}
+
+async function exportConversation() {
+  if (!mainWindow) return;
+
+  // ask preload to scrape conversation
+  mainWindow.webContents.send("export-conversation-request");
+}
+
+// handle conversation export data from preload
+ipcMain.on("export-conversation-data", async (event, data) => {
+  if (!mainWindow) return;
+
+  const { chatName, messages } = data;
+  if (!messages || messages.length === 0) {
+    dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "Export Conversation",
+      message: "No messages found in the current conversation to export.",
+    });
+    return;
+  }
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const safeName = (chatName || "conversation").replace(/[^a-z0-9]/gi, "_");
+  const defaultPath = `${safeName}_${timestamp}.txt`;
+
+  const { filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: "Export Conversation",
+    defaultPath,
+    filters: [
+      { name: "Text Files", extensions: ["txt"] },
+      { name: "Markdown", extensions: ["md"] },
+      { name: "JSON", extensions: ["json"] },
+    ],
+  });
+
+  if (!filePath) return;
+
+  try {
+    let content: string;
+    const ext = path.extname(filePath).toLowerCase();
+
+    if (ext === ".json") {
+      content = JSON.stringify({ chatName, exportedAt: new Date().toISOString(), messages }, null, 2);
+    } else if (ext === ".md") {
+      content = `# ${chatName}\n\nExported: ${new Date().toLocaleString()}\n\n---\n\n`;
+      content += messages.map((m) => `**${m.sender}** (${m.time}):\n${m.text}\n`).join("\n");
+    } else {
+      content = `Conversation: ${chatName}\nExported: ${new Date().toLocaleString()}\n${"=".repeat(50)}\n\n`;
+      content += messages.map((m) => `[${m.time}] ${m.sender}: ${m.text}`).join("\n\n");
+    }
+
+    fs.writeFileSync(filePath, content, "utf8");
+
+    mainWindow.webContents.send("show-toast", {
+      message: `Exported ${messages.length} messages to ${path.basename(filePath)}`,
+      tone: "success",
+    });
+  } catch (err) {
+    dialog.showErrorBox("Export Failed", err instanceof Error ? err.message : String(err));
+  }
+});
+
 function setWindowOpacity(opacity) {
   store.set("windowOpacity", opacity);
   if (mainWindow) {
     mainWindow.setOpacity(opacity);
   }
   updateMenu();
+}
+
+function setFontSize(size: number) {
+  store.set("fontSize", size);
+  applyFontSize();
+  updateMenu();
+}
+
+function applyFontSize() {
+  if (!mainWindow) return;
+  const size = store.get("fontSize");
+  const css = `
+    html, body {
+      font-size: ${size}% !important;
+    }
+    div[dir="auto"] {
+      font-size: ${size <= 100 ? '1em' : `${size / 100}em`} !important;
+    }
+  `;
+  mainWindow.webContents.removeInsertedCSS("font-size").catch(() => {});
+  if (size !== 100) {
+    mainWindow.webContents.insertCSS(css, { cssKey: "font-size" } as any).catch(() => {});
+  }
+}
+
+function toggleSystemThemeSync() {
+  const current = store.get("systemThemeSync");
+  const newValue = !current;
+  store.set("systemThemeSync", newValue);
+
+  if (newValue) {
+    applySystemTheme();
+  }
+  updateMenu();
+}
+
+function applySystemTheme() {
+  if (!store.get("systemThemeSync")) return;
+
+  const isDark = nativeTheme.shouldUseDarkColors;
+
+  // apply appropriate theme based on system
+  if (isDark) {
+    // keep current dark theme or apply oled
+    const currentTheme = store.get("theme");
+    if (currentTheme === "default") {
+      applyTheme("oled");
+    }
+  } else {
+    // for light mode, use default (messenger's built-in light theme)
+    applyTheme("default");
+  }
+}
+
+function toggleLinkPreviewBlocking() {
+  const current = store.get("linkPreviewBlocking");
+  const newValue = !current;
+  store.set("linkPreviewBlocking", newValue);
+
+  if (!mainWindow) return;
+  mainWindow.webContents.send("set-link-preview-blocking", newValue);
+  updateMenu();
+
+  if (newValue) {
+    mainWindow.webContents.send("show-toast", {
+      message: "Link previews will be blocked for privacy.",
+      tone: "success",
+    });
+  }
+}
+
+function toggleScreenshotProtection() {
+  const current = store.get("screenshotProtection");
+  const newValue = !current;
+  store.set("screenshotProtection", newValue);
+
+  if (!mainWindow) return;
+
+  // use content protection API on supported platforms
+  mainWindow.setContentProtection(newValue);
+
+  updateMenu();
+
+  mainWindow.webContents.send("show-toast", {
+    message: newValue
+      ? "Screenshot protection enabled. App content hidden from screen capture."
+      : "Screenshot protection disabled.",
+    tone: newValue ? "success" : "info",
+  });
+}
+
+function showConversationStats() {
+  if (!mainWindow) return;
+  mainWindow.webContents.send("show-conversation-stats");
+}
+
+function searchInConversation() {
+  if (!mainWindow) return;
+  mainWindow.webContents.send("show-conversation-search");
 }
 
 function navigateConversation(direction) {
@@ -1905,7 +2167,7 @@ async function exportCookies() {
       message: `Exported ${allCookies.length} cookies`,
     });
   } catch (err) {
-    dialog.showErrorBox("Export Failed", err.message);
+    dialog.showErrorBox("Export Failed", err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -1944,7 +2206,7 @@ async function importCookies() {
 
     mainWindow.webContents.reload();
   } catch (err) {
-    dialog.showErrorBox("Import Failed", err.message);
+    dialog.showErrorBox("Import Failed", err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -2118,6 +2380,12 @@ function updateMenu() {
               click: toggleBlockTypingIndicator,
             },
             {
+              label: "[EXP] Block Active Status",
+              type: "checkbox",
+              checked: store.get("blockActiveStatus"),
+              click: toggleBlockActiveStatus,
+            },
+            {
               label: "[EXP] Typing Overlay (Better Typing Block)",
               type: "checkbox",
               checked: expTypingOverlay,
@@ -2138,6 +2406,25 @@ function updateMenu() {
               click: toggleKeywordAlerts,
             },
             { label: "Edit Keywords...", click: editKeywordAlerts },
+            { type: "separator" },
+            {
+              label: "[EXP] Unsend Detection",
+              type: "checkbox",
+              checked: store.get("unsendDetection"),
+              click: toggleUnsendDetection,
+            },
+            {
+              label: "[EXP] Block Link Previews",
+              type: "checkbox",
+              checked: store.get("linkPreviewBlocking"),
+              click: toggleLinkPreviewBlocking,
+            },
+            {
+              label: "[EXP] Screenshot Protection",
+              type: "checkbox",
+              checked: store.get("screenshotProtection"),
+              click: toggleScreenshotProtection,
+            },
           ],
         },
         {
@@ -2308,6 +2595,21 @@ function updateMenu() {
               })),
             },
             {
+              label: "[EXP] Font Size",
+              submenu: [80, 90, 100, 110, 120, 130, 150].map((size) => ({
+                label: size === 100 ? "100% (Default)" : `${size}%`,
+                type: "radio",
+                checked: store.get("fontSize") === size,
+                click: () => setFontSize(size),
+              })),
+            },
+            {
+              label: "[EXP] Sync with System Theme",
+              type: "checkbox",
+              checked: store.get("systemThemeSync"),
+              click: toggleSystemThemeSync,
+            },
+            {
               label: "Custom CSS",
               submenu: [
                 {
@@ -2412,6 +2714,24 @@ function updateMenu() {
                 { label: "Set Quiet Hours...", click: () => editQuietHours() },
               ],
             },
+            { type: "separator" },
+            {
+              label: "[EXP] Auto-Reply (Away Mode)",
+              submenu: [
+                {
+                  label: "Enable",
+                  type: "checkbox",
+                  checked: store.get("autoReplyEnabled"),
+                  click: toggleAutoReply,
+                },
+                { label: "Edit Message...", click: editAutoReplyMessage },
+              ],
+            },
+            {
+              label: "[EXP] Export Conversation...",
+              accelerator: "CmdOrCtrl+E",
+              click: exportConversation,
+            },
           ],
         },
         {
@@ -2421,6 +2741,11 @@ function updateMenu() {
               label: "Focus Search",
               accelerator: "CmdOrCtrl+K",
               click: focusSearch,
+            },
+            {
+              label: "[EXP] Search in Conversation",
+              accelerator: "CmdOrCtrl+F",
+              click: searchInConversation,
             },
             { type: "separator" },
             {
@@ -2432,6 +2757,11 @@ function updateMenu() {
               label: "Next Chat",
               accelerator: "CmdOrCtrl+Down",
               click: () => navigateConversation("down"),
+            },
+            { type: "separator" },
+            {
+              label: "[EXP] Conversation Statistics",
+              click: showConversationStats,
             },
           ],
         },
@@ -2675,6 +3005,115 @@ function createWindow() {
   // apply request blockers before loading content (read receipts + typing indicator)
   updateRequestBlocker();
 
+  // context menu for saving media
+  mainWindow.webContents.on("context-menu", (event, params) => {
+    const { mediaType, srcURL, linkURL } = params;
+
+    // build context menu items
+    const menuItems: MenuItemConstructorOptions[] = [];
+
+    if (mediaType === "image" && srcURL) {
+      menuItems.push({
+        label: "Save Image...",
+        click: async () => {
+          try {
+            const url = new URL(srcURL);
+            const pathname = url.pathname.split('?')[0].split('#')[0];
+            const ext = path.extname(pathname) || ".jpg";
+            const filename = `messenger_image_${Date.now()}${ext}`;
+
+            const { filePath } = await dialog.showSaveDialog(mainWindow, {
+              title: "Save Image",
+              defaultPath: filename,
+              filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "gif", "webp"] }],
+            });
+
+            if (filePath) {
+              const response = await session.defaultSession.fetch(srcURL);
+              const buffer = Buffer.from(await response.arrayBuffer());
+              fs.writeFileSync(filePath, buffer);
+              mainWindow.webContents.send("show-toast", {
+                message: `Image saved to ${path.basename(filePath)}`,
+                tone: "success",
+              });
+            }
+          } catch (err) {
+            dialog.showErrorBox("Save Failed", err instanceof Error ? err.message : String(err));
+          }
+        },
+      });
+      menuItems.push({
+        label: "Copy Image URL",
+        click: () => {
+          clipboard.writeText(srcURL);
+          mainWindow.webContents.send("show-toast", { message: "Image URL copied", tone: "info" });
+        },
+      });
+    }
+
+    if (mediaType === "video" && srcURL) {
+      menuItems.push({
+        label: "Save Video...",
+        click: async () => {
+          try {
+            const url = new URL(srcURL);
+            const ext = path.extname(url.pathname) || ".mp4";
+            const filename = `messenger_video_${Date.now()}${ext}`;
+
+            const { filePath } = await dialog.showSaveDialog(mainWindow, {
+              title: "Save Video",
+              defaultPath: filename,
+              filters: [{ name: "Videos", extensions: ["mp4", "webm", "mov"] }],
+            });
+
+            if (filePath) {
+              const response = await session.defaultSession.fetch(srcURL);
+              const buffer = Buffer.from(await response.arrayBuffer());
+              fs.writeFileSync(filePath, buffer);
+              mainWindow.webContents.send("show-toast", {
+                message: `Video saved to ${path.basename(filePath)}`,
+                tone: "success",
+              });
+            }
+          } catch (err) {
+            dialog.showErrorBox("Save Failed", err instanceof Error ? err.message : String(err));
+          }
+        },
+      });
+    }
+
+    if (linkURL && !linkURL.match(/^(javascript|data|vbscript|file):/i)) {
+      menuItems.push({
+        label: "Open Link in Browser",
+        click: () => shell.openExternal(linkURL),
+      });
+      menuItems.push({
+        label: "Copy Link",
+        click: () => {
+          clipboard.writeText(linkURL);
+          mainWindow.webContents.send("show-toast", { message: "Link copied", tone: "info" });
+        },
+      });
+    }
+
+    // add standard edit actions
+    if (params.isEditable) {
+      menuItems.push({ type: "separator" });
+      menuItems.push({ role: "cut" });
+      menuItems.push({ role: "copy" });
+      menuItems.push({ role: "paste" });
+      menuItems.push({ role: "selectAll" });
+    } else if (params.selectionText) {
+      menuItems.push({ type: "separator" });
+      menuItems.push({ role: "copy" });
+    }
+
+    if (menuItems.length > 0) {
+      const contextMenu = Menu.buildFromTemplate(menuItems);
+      contextMenu.popup();
+    }
+  });
+
   if (debugWebSocketFrames || debugWebSocketFramesAll) {
     try {
       if (!mainWindow.webContents.debugger.isAttached()) {
@@ -2774,12 +3213,26 @@ function createWindow() {
       "set-exp-typing-overlay",
       store.get("expTypingOverlay")
     );
+    mainWindow.webContents.send(
+      "set-unsend-detection",
+      store.get("unsendDetection")
+    );
+    mainWindow.webContents.send(
+      "set-link-preview-blocking",
+      store.get("linkPreviewBlocking")
+    );
 
     ensureWebSocketProxyInstalled();
 
     applyModernLook();
     applyFloatingGlass();
     applyUICleanup();
+    applyFontSize();
+
+    // apply screenshot protection if enabled
+    if (store.get("screenshotProtection")) {
+      mainWindow.setContentProtection(true);
+    }
   });
 
   mainWindow.webContents.on("did-frame-finish-load", () => {
@@ -2850,6 +3303,18 @@ function createWindow() {
 
 app.on("ready", () => {
   refreshGlobalShortcuts();
+
+  // listen for system theme changes
+  nativeTheme.on("updated", () => {
+    if (store.get("systemThemeSync")) {
+      applySystemTheme();
+    }
+  });
+
+  // apply system theme on startup if enabled
+  if (store.get("systemThemeSync")) {
+    applySystemTheme();
+  }
 });
 
 app.on("browser-window-created", (event, window) => {

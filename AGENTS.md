@@ -37,3 +37,12 @@
 - Do not log or commit auth/session data; keep `messenger-session.json` local.
 - When adding new permissions or preload bridges, keep them minimal and documented to avoid widening the attack surface.
 - Electron store defaults live in `src/main/state.ts`; update defaults and migration logic together when introducing new settings.
+
+## Code Review
+After completing any significant change (new features, refactors, architecture changes, or multi-file edits), run:
+
+```bash
+coderabbit review --plain
+```
+
+This ensures code quality and catches potential issues before committing.
