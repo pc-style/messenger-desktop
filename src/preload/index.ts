@@ -1379,13 +1379,15 @@ ipcRenderer.on('show-conversation-search', () => {
   let currentIndex = -1
 
   const clearHighlights = () => {
+    const parents = new Set<Node>()
     document.querySelectorAll('.unleashed-highlight').forEach(el => {
       const parent = el.parentNode
       if (parent) {
         parent.replaceChild(document.createTextNode(el.textContent || ''), el)
-        parent.normalize()
+        parents.add(parent)
       }
     })
+    parents.forEach(p => p.normalize())
     matches = []
     currentIndex = -1
   }

@@ -3018,7 +3018,8 @@ function createWindow() {
         click: async () => {
           try {
             const url = new URL(srcURL);
-            const ext = path.extname(url.pathname) || ".jpg";
+            const pathname = url.pathname.split('?')[0].split('#')[0];
+            const ext = path.extname(pathname) || ".jpg";
             const filename = `messenger_image_${Date.now()}${ext}`;
 
             const { filePath } = await dialog.showSaveDialog(mainWindow, {
