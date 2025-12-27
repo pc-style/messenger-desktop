@@ -2380,7 +2380,7 @@ function updateMenu() {
               click: toggleBlockTypingIndicator,
             },
             {
-              label: "Block Active Status",
+              label: "[EXP] Block Active Status",
               type: "checkbox",
               checked: store.get("blockActiveStatus"),
               click: toggleBlockActiveStatus,
@@ -2408,19 +2408,19 @@ function updateMenu() {
             { label: "Edit Keywords...", click: editKeywordAlerts },
             { type: "separator" },
             {
-              label: "Unsend Detection",
+              label: "[EXP] Unsend Detection",
               type: "checkbox",
               checked: store.get("unsendDetection"),
               click: toggleUnsendDetection,
             },
             {
-              label: "Block Link Previews",
+              label: "[EXP] Block Link Previews",
               type: "checkbox",
               checked: store.get("linkPreviewBlocking"),
               click: toggleLinkPreviewBlocking,
             },
             {
-              label: "Screenshot Protection",
+              label: "[EXP] Screenshot Protection",
               type: "checkbox",
               checked: store.get("screenshotProtection"),
               click: toggleScreenshotProtection,
@@ -2595,7 +2595,7 @@ function updateMenu() {
               })),
             },
             {
-              label: "Font Size",
+              label: "[EXP] Font Size",
               submenu: [80, 90, 100, 110, 120, 130, 150].map((size) => ({
                 label: size === 100 ? "100% (Default)" : `${size}%`,
                 type: "radio",
@@ -2604,7 +2604,7 @@ function updateMenu() {
               })),
             },
             {
-              label: "Sync with System Theme",
+              label: "[EXP] Sync with System Theme",
               type: "checkbox",
               checked: store.get("systemThemeSync"),
               click: toggleSystemThemeSync,
@@ -2716,7 +2716,7 @@ function updateMenu() {
             },
             { type: "separator" },
             {
-              label: "Auto-Reply (Away Mode)",
+              label: "[EXP] Auto-Reply (Away Mode)",
               submenu: [
                 {
                   label: "Enable",
@@ -2728,7 +2728,7 @@ function updateMenu() {
               ],
             },
             {
-              label: "Export Conversation...",
+              label: "[EXP] Export Conversation...",
               accelerator: "CmdOrCtrl+E",
               click: exportConversation,
             },
@@ -2743,7 +2743,7 @@ function updateMenu() {
               click: focusSearch,
             },
             {
-              label: "Search in Conversation",
+              label: "[EXP] Search in Conversation",
               accelerator: "CmdOrCtrl+F",
               click: searchInConversation,
             },
@@ -2760,7 +2760,7 @@ function updateMenu() {
             },
             { type: "separator" },
             {
-              label: "Conversation Statistics",
+              label: "[EXP] Conversation Statistics",
               click: showConversationStats,
             },
           ],
