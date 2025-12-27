@@ -1,8 +1,35 @@
 const fs = require("fs");
 const path = require("path");
-const ts = require("typescript");
+const { execSync } = require("child_process");
 
-const ajvRoot = path.join(__dirname, "..", "node_modules", "ajv");
+// fix bun's incomplete package installs for some deps
+const fixPackages = ["agent-base", "https-proxy-agent", "http-proxy-agent"];
+const nodeModules = path.join(__dirname, "..", "node_modules");
+
+for (const pkg of fixPackages) {
+  const pkgPath = path.join(nodeModules, pkg);
+  const distPath = path.join(pkgPath, "dist");
+  if (fs.existsSync(pkgPath) && !fs.existsSync(distPath)) {
+    console.log(`Fixing incomplete package: ${pkg}`);
+    try {
+      execSync(`npm install ${pkg} --prefix "${path.dirname(nodeModules)}" --ignore-scripts`, {
+        stdio: "inherit",
+      });
+    } catch (e) {
+      // ignore errors, npm might not be available
+    }
+  }
+}
+
+// typescript compile ajv if needed
+let ts;
+try {
+  ts = require("typescript");
+} catch {
+  process.exit(0);
+}
+
+const ajvRoot = path.join(nodeModules, "ajv");
 const distRoot = path.join(ajvRoot, "dist");
 const libRoot = path.join(ajvRoot, "lib");
 

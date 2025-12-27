@@ -1,29 +1,32 @@
 {
   "name": "messenger-unleashed",
   "productName": "Messenger Unleashed",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "Messenger desktop app with extra features",
   "type": "module",
   "main": "build/main/index.js",
   "scripts": {
     "build:main": "tsc -p tsconfig.main.json",
-    "build:preload": "tsc -p tsconfig.preload.json && node scripts/rename-preload.cjs",
+    "build:preload": "node scripts/build-preload.cjs",
     "build:ts": "bun run build:main && bun run build:preload",
     "dev": "bun run build:ts && electron . --js-flags=\"--max-old-space-size=4096\"",
     "debug": "bun run build:ts && DEBUG_REQUEST_BLOCKER=1 DEBUG_REQUEST_BLOCKER_GRAPHQL_ALL=1 DEBUG_REQUEST_BLOCKER_WS=1 DEBUG_REQUEST_BLOCKER_WS_DECODE=1 DEBUG_REQUEST_BLOCKER_WS_TRACE_TYPING=1 EXP_BLOCK_TYPING_OVERLAY=1 electron . --js-flags=\"--max-old-space-size=4096\"",
-    "build": "bun run build:ts && electron-builder",
-    "build:mac": "bun run build:ts && electron-builder --mac",
-    "build:win": "bun run build:ts && electron-builder --win",
+    "build": "bun run build:ts && bun x electron-builder",
+    "build:mac": "bun run build:ts && bun x electron-builder --mac",
+    "build:win": "bun run build:ts && bun x electron-builder --win",
     "bump": "node scripts/bump.cjs",
     "postinstall": "node scripts/fix-ajv.cjs"
   },
   "dependencies": {
+    "agent-base": "^7.1.4",
     "electron-store": "^8.1.0",
-    "electron-updater": "^6.3.9"
+    "electron-updater": "^6.3.9",
+    "https-proxy-agent": "^7.0.6"
   },
   "devDependencies": {
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
+    "esbuild": "^0.27.2",
     "typescript": "^5.6.3"
   },
   "build": {
